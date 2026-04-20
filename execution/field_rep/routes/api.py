@@ -1,0 +1,226 @@
+"""
+API routes for the field-rep app.
+
+Thin wrappers around the shared handlers in `hub/guerilla_api.py`. Each
+wrapper resolves the session + Baserow creds, calls the shared handler, then
+invalidates any relevant Redis cache entries.
+
+One endpoint (`GET /api/data/{tid}`) is NOT in the shared module — it reads
+from this app's Redis cache specifically, so it stays here.
+
+URL paths match the hub exactly (`/api/guerilla/*`, `/api/data/{tid}`) so the
+existing mobile.py JS ports over without changes.
+"""
+import asyncio
+import os
+from typing import Awaitable, Callable
+
+import httpx
+from fastapi import APIRouter, Request
+from fastapi.responses import JSONResponse
+
+from hub import guerilla_api
+from hub.constants import (
+    T_GOR_BOXES, T_GOR_ROUTES, T_GOR_ROUTE_STOPS, T_GOR_VENUES,
+)
+
+from .. import storage
+from ..auth import get_session
+
+router = APIRouter()
+
+
+# ─── helpers ─────────────────────────────────────────────────────────────────
+def _env() -> tuple[str, str]:
+    return (os.environ.get("BASEROW_URL", ""),
+            os.environ.get("BASEROW_API_TOKEN", ""))
+
+
+async def _fetch_table_all(br: str, bt: str, tid: int) -> list:
+    """Paginated full-table fetch. Mirrors the hub's implementation."""
+    headers = {"Authorization": f"Token {bt}"}
+    base_url = f"{br}/api/database/rows/table/{tid}/?size=200&user_field_names=true&page="
+    async with httpx.AsyncClient(timeout=30) as client:
+        r1 = await client.get(base_url + "1", headers=headers)
+        if not r1.is_success:
+            return []
+        d1 = r1.json()
+        rows = list(d1.get("results", []))
+        if not d1.get("next"):
+            return rows
+        total_pages = (d1.get("count", 0) + 199) // 200
+        resps = await asyncio.gather(*[
+            client.get(base_url + str(p), headers=headers)
+            for p in range(2, total_pages + 1)
+        ])
+        for resp in resps:
+            if resp.is_success:
+                rows.extend(resp.json().get("results", []))
+    return rows
+
+
+async def _cached_rows(tid: int) -> list:
+    """Cache-aware fetcher passed to shared handlers that need table data."""
+    br, bt = _env()
+    return await storage.cached_table(tid, lambda: _fetch_table_all(br, bt, tid))
+
+
+async def _invalidate(*tids: int) -> None:
+    for tid in tids:
+        try:
+            await storage.invalidate_table(tid)
+        except Exception:
+            pass
+
+
+def _bunny_env() -> tuple[str, str, str]:
+    return (
+        os.environ.get("BUNNY_STORAGE_ZONE", "techopssocialmedia"),
+        os.environ.get("BUNNY_STORAGE_API_KEY", ""),
+        os.environ.get("BUNNY_CDN_BASE", "https://techopssocialmedia.b-cdn.net"),
+    )
+
+
+# ─── Generic table fetch (locally-cached) ────────────────────────────────────
+@router.get("/api/data/{tid}")
+async def table_data(tid: int, request: Request):
+    if not await get_session(request):
+        return JSONResponse({"error": "unauthorized"}, status_code=401)
+    rows = await _cached_rows(tid)
+    return JSONResponse(rows)
+
+
+# ─── Guerilla activity log ───────────────────────────────────────────────────
+@router.post("/api/guerilla/log")
+async def guerilla_log(request: Request):
+    session = await get_session(request)
+    if not session:
+        return JSONResponse({"ok": False, "error": "unauthenticated"}, status_code=401)
+    br, bt = _env()
+    bzone, bkey, bcdn = _bunny_env()
+    resp = await guerilla_api.guerilla_log(request, br, bt, session,
+                                           bunny_zone=bzone, bunny_key=bkey,
+                                           bunny_cdn_base=bcdn)
+    return resp
+
+
+# ─── Massage box CRUD ────────────────────────────────────────────────────────
+@router.post("/api/guerilla/boxes")
+async def create_box(request: Request):
+    session = await get_session(request)
+    if not session:
+        return JSONResponse({"ok": False, "error": "unauthenticated"}, status_code=401)
+    br, bt = _env()
+    resp = await guerilla_api.create_box(request, br, bt, session)
+    await _invalidate(T_GOR_BOXES)
+    return resp
+
+
+@router.patch("/api/guerilla/boxes/{box_id}/pickup")
+async def pickup_box(request: Request, box_id: int):
+    session = await get_session(request)
+    if not session:
+        return JSONResponse({"ok": False, "error": "unauthenticated"}, status_code=401)
+    br, bt = _env()
+    resp = await guerilla_api.pickup_box(request, br, bt, session, box_id)
+    await _invalidate(T_GOR_BOXES)
+    return resp
+
+
+@router.patch("/api/guerilla/boxes/{box_id}")
+async def update_box(request: Request, box_id: int):
+    session = await get_session(request)
+    if not session:
+        return JSONResponse({"ok": False, "error": "unauthenticated"}, status_code=401)
+    br, bt = _env()
+    resp = await guerilla_api.update_box(request, br, bt, session, box_id)
+    await _invalidate(T_GOR_BOXES)
+    return resp
+
+
+@router.patch("/api/guerilla/boxes/{box_id}/days")
+async def update_box_days(request: Request, box_id: int):
+    session = await get_session(request)
+    if not session:
+        return JSONResponse({"ok": False, "error": "unauthenticated"}, status_code=401)
+    br, bt = _env()
+    resp = await guerilla_api.update_box_days(request, br, bt, session, box_id)
+    await _invalidate(T_GOR_BOXES)
+    return resp
+
+
+# ─── Venue update ────────────────────────────────────────────────────────────
+@router.patch("/api/guerilla/venues/{venue_id}")
+async def update_venue(request: Request, venue_id: int):
+    session = await get_session(request)
+    if not session:
+        return JSONResponse({"ok": False, "error": "unauthenticated"}, status_code=401)
+    br, bt = _env()
+    resp = await guerilla_api.update_venue(request, br, bt, session, venue_id)
+    await _invalidate(T_GOR_VENUES)
+    return resp
+
+
+# ─── Routes API ──────────────────────────────────────────────────────────────
+@router.get("/api/guerilla/routes/today")
+async def routes_today(request: Request):
+    session = await get_session(request)
+    if not session:
+        return JSONResponse({"error": "unauthenticated"}, status_code=401)
+    br, bt = _env()
+    return await guerilla_api.routes_today(request, br, bt, session, _cached_rows)
+
+
+@router.patch("/api/guerilla/routes/stops/{stop_id}")
+async def update_route_stop(request: Request, stop_id: int):
+    session = await get_session(request)
+    if not session:
+        return JSONResponse({"error": "unauthenticated"}, status_code=401)
+    br, bt = _env()
+    resp = await guerilla_api.update_route_stop(request, br, bt, session, stop_id)
+    await _invalidate(T_GOR_ROUTE_STOPS)
+    return resp
+
+
+@router.post("/api/guerilla/routes")
+async def gorilla_routes_create(request: Request):
+    session = await get_session(request)
+    if not session:
+        return JSONResponse({"error": "unauthenticated"}, status_code=401)
+    br, bt = _env()
+    resp = await guerilla_api.gorilla_routes_create(request, br, bt, session)
+    await _invalidate(T_GOR_ROUTES, T_GOR_ROUTE_STOPS)
+    return resp
+
+
+@router.patch("/api/guerilla/routes/{route_id}/status")
+async def gorilla_route_status(request: Request, route_id: int):
+    session = await get_session(request)
+    if not session:
+        return JSONResponse({"error": "unauthenticated"}, status_code=401)
+    br, bt = _env()
+    resp = await guerilla_api.gorilla_route_status(request, br, bt, session, route_id)
+    await _invalidate(T_GOR_ROUTES)
+    return resp
+
+
+@router.patch("/api/guerilla/routes/{route_id}")
+async def gorilla_route_update(request: Request, route_id: int):
+    session = await get_session(request)
+    if not session:
+        return JSONResponse({"error": "unauthenticated"}, status_code=401)
+    br, bt = _env()
+    resp = await guerilla_api.gorilla_route_update(request, br, bt, session, route_id, _cached_rows)
+    await _invalidate(T_GOR_ROUTES, T_GOR_ROUTE_STOPS)
+    return resp
+
+
+@router.delete("/api/guerilla/routes/{route_id}")
+async def gorilla_route_delete(request: Request, route_id: int):
+    session = await get_session(request)
+    if not session:
+        return JSONResponse({"error": "unauthenticated"}, status_code=401)
+    br, bt = _env()
+    resp = await guerilla_api.gorilla_route_delete(request, br, bt, session, route_id, _cached_rows)
+    await _invalidate(T_GOR_ROUTES, T_GOR_ROUTE_STOPS)
+    return resp

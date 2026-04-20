@@ -11,6 +11,7 @@ from .shared import (
     T_EVENTS, T_LEADS,
 )
 from .guerilla import GFR_EXTRA_HTML, GFR_EXTRA_JS
+from .contact_detail import contact_actions_js
 
 
 # ===========================================================================
@@ -827,7 +828,7 @@ function renderRouteSheet(stop) {{
     html += '<div style="padding:16px;display:flex;gap:10px">';
     html += '<button onclick="routeCheckIn('+id+')" style="flex:1;background:#ea580c;color:#fff;border:none;border-radius:10px;padding:14px;font-size:15px;font-weight:700;cursor:pointer">Check In</button>';
     html += '<button onclick="routeSkip('+id+')" style="width:70px;background:var(--bg);color:var(--text2);border:1px solid var(--border);border-radius:10px;padding:14px;font-size:12px;font-weight:600;cursor:pointer">Skip</button>';
-    html += '<button onclick="routeNotReached('+id+')" style="width:70px;background:var(--bg);color:#ef4444;border:1px solid #ef444440;border-radius:10px;padding:14px;font-size:11px;font-weight:600;cursor:pointer;line-height:1.2">Didn\'t<br>Get To</button>';
+    html += '<button onclick="routeNotReached('+id+')" style="width:70px;background:var(--bg);color:#ef4444;border:1px solid #ef444440;border-radius:10px;padding:14px;font-size:11px;font-weight:600;cursor:pointer;line-height:1.2">Didn\\\'t<br>Get To</button>';
     html += '</div>';
   }} else {{
     html += '<div style="padding:16px"><button onclick="routeCheckInForm()" style="width:100%;background:#ea580c;color:#fff;border:none;border-radius:10px;padding:14px;font-size:15px;font-weight:700;cursor:pointer">Check In</button></div>';
@@ -877,20 +878,48 @@ async function loadRouteVenueData(stop) {{
     ih += '<select onchange="updateRouteVenueStatus('+venueId+',this.value)" style="width:100%;background:var(--bg);border:1px solid var(--border);color:var(--text1);border-radius:8px;padding:8px 10px;font-size:14px;margin-bottom:10px"' + (curSt==='Active Partner' && !IS_ADMIN ? ' disabled' : '') + '>';
     stOpts.forEach(function(s) {{ ih += '<option'+(curSt===s?' selected':'')+'>'+s+'</option>'; }});
     ih += '</select>';
+    // ── Follow-Up Date ──────────────────────────────────────────────
+    ih += '<div class="m-sheet-lbl">\U0001f5d3\ufe0f Follow-Up Date</div>';
+    ih += '<div style="display:flex;gap:6px;margin-bottom:4px">';
+    ih += '<input type="date" id="rv-fu-'+id+'" value="'+esc(fu)+'" style="flex:1;background:var(--bg);border:1px solid var(--border);color:var(--text1);border-radius:8px;padding:8px 10px;font-size:14px">';
+    ih += '<button onclick="mRouteSaveFollowUp()" style="background:#3b82f6;color:#fff;border:none;border-radius:8px;padding:8px 14px;font-size:13px;font-weight:600;cursor:pointer;min-width:60px;min-height:40px">Save</button>';
+    ih += '</div>';
+    ih += '<div id="rv-fu-st-'+id+'" style="font-size:11px;margin-bottom:10px;min-height:14px"></div>';
+    // ── Notes (read + add) ──────────────────────────────────────────
     ih += '<div class="m-sheet-lbl">\U0001f4dd Notes</div>';
-    ih += '<div style="max-height:100px;overflow-y:auto;background:var(--card);border-radius:8px;padding:8px 10px;border:1px solid var(--border);font-size:13px">';
+    ih += '<div id="rv-notes-display-'+id+'" style="max-height:120px;overflow-y:auto;background:var(--card);border-radius:8px;padding:8px 10px;border:1px solid var(--border);font-size:13px;margin-bottom:6px">';
     ih += renderNotesM(notesRaw) + '</div>';
+    ih += '<div style="display:flex;gap:6px">';
+    ih += '<input type="text" id="rv-note-in-'+id+'" placeholder="Add a note\u2026" style="flex:1;background:var(--bg);border:1px solid var(--border);color:var(--text1);border-radius:8px;padding:8px 10px;font-size:14px">';
+    ih += '<button onclick="mRouteAddNote()" style="background:#e94560;color:#fff;border:none;border-radius:8px;padding:8px 14px;font-size:13px;font-weight:600;cursor:pointer;min-width:50px;min-height:40px">Add</button>';
+    ih += '</div>';
+    ih += '<div id="rv-note-st-'+id+'" style="font-size:11px;margin-top:4px;min-height:14px"></div>';
     infoEl.innerHTML = ih;
   }}
 
-  // Fill Activity tab
+  // Fill Activity tab — log-new form + history
   var actsEl = document.getElementById('rv-acts-' + id);
   if (actsEl) {{
     var myActs = acts.filter(function(a) {{
       var lf = a['Business'];
       return Array.isArray(lf) && lf.some(function(r){{return r.id===venueId;}});
     }}).sort(function(a,b){{return (b['Date']||'').localeCompare(a['Date']||'');}}).slice(0,10);
-    actsEl.innerHTML = myActs.length
+    // Log-new-activity form (collapsed by default)
+    var ah = '<div style="margin-bottom:12px">';
+    ah += '<button onclick="mRouteToggleLogForm()" style="width:100%;background:#ea580c20;color:#ea580c;border:1px solid #ea580c40;border-radius:8px;padding:10px;font-size:13px;font-weight:600;cursor:pointer;min-height:44px">+ Log new activity</button>';
+    ah += '<div id="rv-act-form-'+id+'" style="display:none;margin-top:10px;background:var(--card);border:1px solid var(--border);border-radius:8px;padding:10px">';
+    ah += '<select id="rv-act-type-'+id+'" style="width:100%;background:var(--bg);border:1px solid var(--border);color:var(--text1);border-radius:6px;padding:8px 10px;font-size:14px;margin-bottom:6px">';
+    ah += '<option value="">Type\u2026</option><option>Email</option><option>Phone</option><option>In-Person</option><option>Text</option><option>Other</option>';
+    ah += '</select>';
+    ah += '<select id="rv-act-out-'+id+'" style="width:100%;background:var(--bg);border:1px solid var(--border);color:var(--text1);border-radius:6px;padding:8px 10px;font-size:14px;margin-bottom:6px">';
+    ah += '<option value="">Outcome\u2026</option><option>Positive</option><option>Neutral</option><option>Negative</option><option>Left message</option><option>No answer</option>';
+    ah += '</select>';
+    ah += '<input type="text" id="rv-act-sum-'+id+'" placeholder="Brief summary\u2026" style="width:100%;background:var(--bg);border:1px solid var(--border);color:var(--text1);border-radius:6px;padding:8px 10px;font-size:14px;margin-bottom:8px;box-sizing:border-box">';
+    ah += '<button onclick="mRouteLogActivity()" style="width:100%;background:#ea580c;color:#fff;border:none;border-radius:6px;padding:10px;font-size:14px;font-weight:600;cursor:pointer;min-height:44px">Save Activity</button>';
+    ah += '<div id="rv-act-st-'+id+'" style="font-size:11px;margin-top:6px;text-align:center;min-height:14px"></div>';
+    ah += '</div></div>';
+    // History list — wrapped so the log-activity handler can prepend to it
+    var histHtml = myActs.length
       ? myActs.map(function(a) {{
           var t = (a['Type'] && a['Type'].value) || a['Type'] || '';
           var o = (a['Outcome'] && a['Outcome'].value) || a['Outcome'] || '';
@@ -901,6 +930,7 @@ async function loadRouteVenueData(stop) {{
             + '<div style="font-size:11px;color:var(--text3)">'+esc(d)+'</div></div>';
         }}).join('')
       : '<div style="color:var(--text3)">No activities yet</div>';
+    actsEl.innerHTML = ah + '<div id="rv-acts-list-'+id+'">' + histHtml + '</div>';
   }}
 
   // Fill Events tab
@@ -1141,10 +1171,104 @@ async function updateBoxDays(boxId) {{
   }} catch(e) {{ if (st) {{ st.style.color='#ef4444'; st.textContent='Error'; }} }}
 }}
 
+// ── Field-rep quick-edit handlers (Contact.* backed) ───────────────────────
+async function mRouteSaveFollowUp() {{
+  var stop = _rCurrentStop; if (!stop || !stop.venue_id) return;
+  var venueId = stop.venue_id, id = stop.stop_id;
+  var inEl = document.getElementById('rv-fu-' + id);
+  var stEl = document.getElementById('rv-fu-st-' + id);
+  var val = inEl ? (inEl.value || null) : null;
+  if (stEl) {{ stEl.textContent = 'Saving\u2026'; stEl.style.color = 'var(--text3)'; }}
+  var res = await Contact.saveFollowUp('gorilla', venueId, val);
+  if (stEl) {{
+    stEl.textContent = res.ok ? '\u2713 Saved' : '\u2717 Failed';
+    stEl.style.color = res.ok ? '#059669' : '#ef4444';
+    setTimeout(function() {{ if (stEl) stEl.textContent = ''; }}, 2000);
+  }}
+}}
+
+async function mRouteAddNote() {{
+  var stop = _rCurrentStop; if (!stop || !stop.venue_id) return;
+  var venueId = stop.venue_id, id = stop.stop_id;
+  var inEl = document.getElementById('rv-note-in-' + id);
+  var text = (inEl ? inEl.value : '').trim();
+  if (!text) return;
+  var stEl = document.getElementById('rv-note-st-' + id);
+  if (stEl) {{ stEl.textContent = 'Saving\u2026'; stEl.style.color = 'var(--text3)'; }}
+  try {{
+    var v = await Contact.fetchVenue('gorilla', venueId);
+    var existing = (v && v['Notes']) || '';
+    var res = await Contact.addNote('gorilla', venueId, existing, text);
+    if (stEl) {{
+      stEl.textContent = res.ok ? '\u2713 Added' : '\u2717 Failed';
+      stEl.style.color = res.ok ? '#059669' : '#ef4444';
+      setTimeout(function() {{ if (stEl) stEl.textContent = ''; }}, 2000);
+    }}
+    if (res.ok) {{
+      if (inEl) inEl.value = '';
+      var displayEl = document.getElementById('rv-notes-display-' + id);
+      if (displayEl) displayEl.innerHTML = renderNotesM(res.newNotes);
+    }}
+  }} catch(e) {{
+    if (stEl) {{ stEl.textContent = 'Error'; stEl.style.color = '#ef4444'; }}
+  }}
+}}
+
+async function mRouteLogActivity() {{
+  var stop = _rCurrentStop; if (!stop || !stop.venue_id) return;
+  var venueId = stop.venue_id, id = stop.stop_id;
+  var typeEl = document.getElementById('rv-act-type-' + id);
+  var outEl  = document.getElementById('rv-act-out-' + id);
+  var sumEl  = document.getElementById('rv-act-sum-' + id);
+  var stEl   = document.getElementById('rv-act-st-' + id);
+  var formEl = document.getElementById('rv-act-form-' + id);
+  var listEl = document.getElementById('rv-acts-list-' + id);
+  var type    = typeEl ? typeEl.value : '';
+  var outcome = outEl  ? outEl.value  : '';
+  var summary = sumEl  ? sumEl.value.trim()  : '';
+  if (!type) {{ if (stEl) {{ stEl.textContent = 'Pick a type first'; stEl.style.color = '#ef4444'; }} return; }}
+  if (stEl) {{ stEl.textContent = 'Saving\u2026'; stEl.style.color = 'var(--text3)'; }}
+  var res = await Contact.logActivity('gorilla', venueId, {{type: type, outcome: outcome, summary: summary}});
+  if (stEl) {{
+    stEl.textContent = res.ok ? '\u2713 Logged' : '\u2717 Failed';
+    stEl.style.color = res.ok ? '#059669' : '#ef4444';
+    setTimeout(function() {{ if (stEl) stEl.textContent = ''; }}, 2000);
+  }}
+  if (res.ok) {{
+    if (typeEl) typeEl.value = '';
+    if (outEl) outEl.value = '';
+    if (sumEl) sumEl.value = '';
+    if (formEl) formEl.style.display = 'none';
+    if (listEl) {{
+      var d = (res.row && res.row['Date']) || new Date().toISOString().split('T')[0];
+      var html = '<div style="padding:6px 0;border-bottom:1px solid var(--border);font-size:13px">'
+        + '<span style="font-weight:600">'+esc(type)+'</span>'
+        + (outcome ? ' \u2014 '+esc(outcome) : '')
+        + (summary ? '<div style="font-size:12px;color:var(--text2);margin-top:2px">'+esc(summary)+'</div>' : '')
+        + '<div style="font-size:11px;color:var(--text3)">'+esc(d)+'</div></div>';
+      if (listEl.innerHTML.indexOf('No activities yet') !== -1) listEl.innerHTML = '';
+      listEl.innerHTML = html + listEl.innerHTML;
+    }}
+  }}
+}}
+
+function mRouteToggleLogForm() {{
+  var stop = _rCurrentStop; if (!stop) return;
+  var el = document.getElementById('rv-act-form-' + stop.stop_id);
+  if (el) el.style.display = el.style.display === 'none' ? 'block' : 'none';
+}}
+
 loadRoute();
 """
     admin = _is_admin(user or {})
-    script_js = f"const GFR_USER={repr(user_name)};\nconst TOOL = {{venuesT: {T_GOR_VENUES}}};\nconst IS_ADMIN = {'true' if admin else 'false'};\n" + route_js
+    script_js = (
+        f"const GFR_USER={repr(user_name)};\n"
+        f"const TOOL = {{venuesT: {T_GOR_VENUES}}};\n"
+        f"const IS_ADMIN = {'true' if admin else 'false'};\n"
+        f"const _TOOL_KEY = 'gorilla';\n"
+        + contact_actions_js() + "\n"
+        + route_js
+    )
     return _mobile_page('m_route', 'My Route', body, script_js, br, bt, user=user, wrap_cls='map-mode',
                          extra_html=GFR_EXTRA_HTML, extra_js=GFR_EXTRA_JS)
 

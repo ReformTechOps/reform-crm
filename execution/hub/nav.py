@@ -155,7 +155,6 @@ def _topnav(active: str, user: dict = None) -> str:
         drawer_links += '<a href="/calendar">Calendar</a>'
     drawer_links += (
         '<div class="tnav-sep"></div>'
-        '<a href="/m" class="drawer-mobile-link">\U0001f4f1 Mobile View</a>'
         '<a href="/logout" style="color:var(--text3)">Sign Out</a>'
     )
 
@@ -188,7 +187,6 @@ def _topnav(active: str, user: dict = None) -> str:
 
     return (
         '<nav class="tnav">'
-        '<button class="tnav-hamburger" onclick="openDrawer()">\u2630</button>'
         '<a href="/" class="tnav-logo">\u2726 Reform <span>Operations Hub</span></a>'
         '<div class="tnav-items">'
         + nav_items
@@ -196,9 +194,9 @@ def _topnav(active: str, user: dict = None) -> str:
         '<div class="tnav-right">'
         '<button class="tnav-theme-btn" id="theme-btn" onclick="toggleTheme()"><span id="theme-icon">\U0001f319</span></button>'
         + (f'<span class="tnav-user">{user_name}</span>' if user_name else '')
-        + '<a href="/m" class="tnav-btn" style="font-size:12px" title="Mobile View">\U0001f4f1</a>'
         + '<a href="/logout" class="tnav-signout">Sign Out</a>'
         '</div>'
+        '<button class="tnav-hamburger" onclick="openDrawer()">\u2630</button>'
         '</nav>'
         + drawer_html
     )

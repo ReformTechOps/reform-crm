@@ -96,7 +96,7 @@ function statusChip(s) {
 function renderQueueItem(m) {
   const caption = esc((m.caption||'').substring(0,90)) + ((m.caption||'').length>90?'\u2026':'');
   const thumb = m.media_url && m.content_type==='photo'
-    ? '<img src="'+esc(m.media_url)+'" style="width:52px;height:52px;object-fit:cover;border-radius:6px;flex-shrink:0" onerror="this.style.display=\'none\'">'
+    ? '<img src="'+esc(m.media_url)+'" style="width:52px;height:52px;object-fit:cover;border-radius:6px;flex-shrink:0" onerror="this.style.display=\\'none\\'">'
     : '<div style="width:52px;height:52px;border-radius:6px;background:var(--card);display:flex;align-items:center;justify-content:center;flex-shrink:0;font-size:20px">'+(m.content_type==='video'?'\U0001f3ac':'\U0001f4f7')+'</div>';
   return '<div style="display:flex;gap:12px;padding:12px 16px;border-bottom:1px solid var(--border);align-items:flex-start">'
     + thumb

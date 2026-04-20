@@ -297,9 +297,10 @@ function _tryDeepLink() {{
   if (!_deepLinkPending || !_dataReady || !_mapReady) return;
   var dl = _deepLinkPending;
   _deepLinkPending = null;
-  // Enable ALL layer checkboxes and ALL status filters so venue is guaranteed visible
+  // Narrow layers to the deep-linked tool (if any); leave status filters fully on
+  // so the selected venue renders regardless of its pipeline stage.
   document.querySelectorAll('#rp-layers input[data-layer]').forEach(function(cb) {{
-    cb.checked = true;
+    cb.checked = !dl.tool || cb.dataset.layer === dl.tool;
   }});
   document.querySelectorAll('#rp-filters input[data-status]').forEach(function(cb) {{
     cb.checked = true;
@@ -383,9 +384,9 @@ function _pinIcon(color, hasBoxAlert) {{
 }}
 function _pinIconSelected(color) {{
   return {{
-    path: google.maps.SymbolPath.CIRCLE, scale: 14,
-    fillColor: '#fff', fillOpacity: 1,
-    strokeColor: color, strokeWeight: 4
+    path: google.maps.SymbolPath.CIRCLE, scale: 13,
+    fillColor: color, fillOpacity: 1,
+    strokeColor: '#fff', strokeWeight: 3
   }};
 }}
 function _hasBoxAlert(v) {{

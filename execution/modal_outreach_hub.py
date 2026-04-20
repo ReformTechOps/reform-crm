@@ -18,8 +18,9 @@ Requires Modal secret "outreach-hub-secrets":
 import os
 import secrets
 import time
+from datetime import datetime, timezone
 from pathlib import Path
-from urllib.parse import urlencode
+from urllib.parse import parse_qs, quote, unquote, urlencode, urlparse
 import modal
 
 # Ensure hub package is importable at deploy time
@@ -53,6 +54,7 @@ from hub.billing import _billing_page
 from hub.comms import _contacts_page, _communications_email_page
 from hub.social import _social_poster_hub_page, _social_schedule_page
 from hub.events import _event_detail_page, _lead_form_page, _leads_dashboard_page
+from hub import guerilla_api
 
 app = modal.App("outreach-hub")
 image = (
@@ -129,7 +131,7 @@ def _get_user(req) -> dict:
 _WARM_TABLES = [
     T_ATT_VENUES, T_GOR_VENUES, T_COM_VENUES,
     T_PI_ACTIVE, T_PI_BILLED, T_PI_AWAITING, T_PI_CLOSED,
-    T_GOR_BOXES,
+    T_GOR_BOXES, T_GOR_ROUTES, T_GOR_ROUTE_STOPS, T_GOR_ACTS,
 ]
 
 @app.function(
@@ -222,7 +224,7 @@ def web():
             "client_id":     env["gid"],
             "redirect_uri":  _redirect_uri(request),
             "response_type": "code",
-            "scope":         "openid email profile https://www.googleapis.com/auth/gmail.send https://www.googleapis.com/auth/gmail.readonly",
+            "scope":         "openid email profile https://www.googleapis.com/auth/gmail.send https://www.googleapis.com/auth/gmail.readonly https://www.googleapis.com/auth/calendar.readonly",
             "access_type":   "offline",
             "prompt":        "consent",
             "state":         state,
@@ -506,6 +508,46 @@ def web():
             "boxes": [{"s": r.get("Status"), "d": r.get("Date Placed"), "p": r.get("Pickup Days")} for r in boxes],
         })
 
+    # ── Calendar API ───────────────────────────────────────────────────────────
+    @fapp.get("/api/calendar/events")
+    async def calendar_events(request: Request):
+        session = _get_session(request)
+        if not session:
+            return JSONResponse({"error": "unauthorized"}, status_code=401)
+        env = _env()
+        sid = request.cookies.get(SESSION_COOKIE, "")
+        token = await _refresh_if_needed(sid, session, env)
+        if not token:
+            return JSONResponse({"error": "no_token"}, status_code=401)
+        cal_id = os.environ.get("CALENDAR_ID", "")
+        if not cal_id:
+            embed = os.environ.get("GOOGLE_CALENDAR_EMBED_URL", "")
+            cal_id = unquote(parse_qs(urlparse(embed).query).get("src", [""])[0])
+        if not cal_id:
+            return JSONResponse({"items": []})
+        now_iso = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+        url = (f"https://www.googleapis.com/calendar/v3/calendars/{quote(cal_id)}/events"
+               f"?timeMin={now_iso}&maxResults=20&singleEvents=true&orderBy=startTime")
+        async with httpx.AsyncClient() as client:
+            r = await client.get(url, headers={"Authorization": f"Bearer {token}"})
+        if r.status_code != 200:
+            return JSONResponse({"error": "fetch_failed", "status": r.status_code, "detail": r.text[:500]},
+                                status_code=502)
+        data = r.json()
+        def slim(ev):
+            start = ev.get("start", {})
+            end   = ev.get("end", {})
+            all_day = "date" in start
+            return {
+                "summary":  ev.get("summary", "(no title)"),
+                "start":    start.get("dateTime") or start.get("date", ""),
+                "end":      end.get("dateTime") or end.get("date", ""),
+                "allDay":   all_day,
+                "location": ev.get("location", ""),
+                "link":     ev.get("htmlLink", ""),
+            }
+        return JSONResponse({"items": [slim(ev) for ev in data.get("items", [])]})
+
     # ── Gmail API ──────────────────────────────────────────────────────────────
     @fapp.post("/api/gmail/send")
     async def gmail_send(request: Request):
@@ -656,8 +698,6 @@ def web():
     async def hub(request: Request):
         user, br, bt = _guard(request)
         if not user: return RedirectResponse(url="/login")
-        if _is_mobile(request):
-            return RedirectResponse(url="/m")
         return HTMLResponse(_hub_page(br, bt, user=user))
 
     # ── Tool dashboards (viewable by field users, read-only) ──────────────────
@@ -922,884 +962,140 @@ def web():
     # ── Guerilla Field Reports ─────────────────────────────────────────────────
     @fapp.post("/api/guerilla/log")
     async def guerilla_log(request: Request):
-        import json as _json
-        from datetime import date as _date
         session = _get_session(request)
         if not session:
             return JSONResponse({"ok": False, "error": "unauthenticated"}, status_code=401)
-        if not _has_hub_access(session, "guerilla"):
-            return JSONResponse({"ok": False, "error": "forbidden"}, status_code=403)
         env = _env()
-        br, bt = env["br"], env["bt"]
+        return await guerilla_api.guerilla_log(
+            request, env["br"], env["bt"], session,
+            bunny_zone=os.environ.get("BUNNY_STORAGE_ZONE", "techopssocialmedia"),
+            bunny_key=os.environ.get("BUNNY_STORAGE_API_KEY", ""),
+            bunny_cdn_base="https://techopssocialmedia.b-cdn.net",
+        )
 
-        # ── Parse payload (JSON or multipart for flyer upload) ─────────────────
-        content_type = request.headers.get("content-type", "")
-        flyer_bytes = None
-        flyer_filename = None
-        if "multipart/form-data" in content_type:
-            form = await request.form()
-            form_type = (form.get("form_type") or "").strip()
+
+    # ── Massage Box CRUD ──────────────────────────────────────────────────────
+    def _invalidate(*tids: int) -> None:
+        for tid in tids:
             try:
-                fields = _json.loads(form.get("fields") or "{}")
-            except Exception:
-                fields = {}
-            user_name = (form.get("user_name") or session.get("name", "")).strip()
-            flyer_file = form.get("flyer")
-            if flyer_file and hasattr(flyer_file, "read"):
-                flyer_bytes = await flyer_file.read()
-                flyer_filename = flyer_file.filename or "flyer.jpg"
-        else:
-            body = await request.json()
-            form_type = (body.get("form_type") or "").strip()
-            fields    = body.get("fields") or {}
-            user_name = (body.get("user_name") or session.get("name", "")).strip()
-
-        if not form_type:
-            return JSONResponse({"ok": False, "error": "form_type required"}, status_code=400)
-
-        today = _date.today().isoformat()
-
-        async with httpx.AsyncClient(timeout=60) as client:
-            br_headers = {"Authorization": f"Token {bt}", "Content-Type": "application/json"}
-
-            # ── Venue upsert (Forms 1, 3, 4, 5) ───────────────────────────────
-            venue_id = None
-            FORMS_WITH_VENUE = {
-                "Business Outreach Log", "Mobile Massage Service",
-                "Lunch and Learn", "Health Assessment Screening",
-            }
-            if form_type in FORMS_WITH_VENUE:
-                company_name = (
-                    fields.get("company_name") or fields.get("business_name") or ""
-                ).strip()
-                if company_name:
-                    sr = await client.get(
-                        f"{br}/api/database/rows/table/{T_GOR_VENUES}/",
-                        params={"search": company_name, "user_field_names": "true", "size": 10},
-                        headers={"Authorization": f"Token {bt}"},
-                    )
-                    venue_row = None
-                    if sr.is_success:
-                        for row in sr.json().get("results", []):
-                            if (row.get("Name") or "").strip().lower() == company_name.lower():
-                                venue_row = row
-                                break
-                    if venue_row:
-                        venue_id = venue_row["id"]
-                    else:
-                        venue_fields: dict = {"Name": company_name}
-                        addr    = (fields.get("venue_address") or fields.get("business_address") or "").strip()
-                        phone   = (fields.get("contact_phone") or "").strip()
-                        email   = (fields.get("contact_email") or "").strip()
-                        contact = (fields.get("point_of_contact_name") or "").strip()
-                        if addr:    venue_fields["Address"]        = addr
-                        if phone:   venue_fields["Phone"]          = phone
-                        if email:   venue_fields["Email"]          = email
-                        if contact: venue_fields["Contact Person"] = contact
-                        vr = await client.post(
-                            f"{br}/api/database/rows/table/{T_GOR_VENUES}/?user_field_names=true",
-                            headers=br_headers,
-                            json=venue_fields,
-                        )
-                        if vr.status_code in (200, 201):
-                            venue_id = vr.json().get("id")
-
-            # ── Flyer upload to Bunny CDN (External Event only) ────────────────
-            flyer_url = None
-            if flyer_bytes and flyer_filename:
-                zone = os.environ.get("BUNNY_STORAGE_ZONE", "techopssocialmedia")
-                key  = os.environ.get("BUNNY_STORAGE_API_KEY", "")
-                safe_name  = flyer_filename.replace(" ", "_")
-                upload_url = f"https://la.storage.bunnycdn.com/{zone}/guerilla/events/{safe_name}"
-                cdn_base   = f"https://techopssocialmedia.b-cdn.net"
-                ur = await client.put(
-                    upload_url,
-                    content=flyer_bytes,
-                    headers={"AccessKey": key, "Content-Type": "application/octet-stream"},
-                )
-                if ur.status_code in (200, 201):
-                    flyer_url = f"{cdn_base}/guerilla/events/{safe_name}"
-
-            # ── Build Summary text ─────────────────────────────────────────────
-            def _f(label, val):
-                return f"{label}: {val}\n" if (val is not None and val != "") else ""
-
-            lines = [f"Form: {form_type}", f"Submitted by: {user_name}", ""]
-
-            if form_type == "Business Outreach Log":
-                lines += [
-                    _f("Business",        fields.get("business_name")),
-                    _f("Contact",         fields.get("point_of_contact_name")),
-                    _f("Phone",           fields.get("contact_phone")),
-                    _f("Email",           fields.get("contact_email")),
-                    _f("Address",         fields.get("business_address")),
-                    _f("Massage Box Left",fields.get("massage_box_left")),
-                    "\n=== Lunch & Learn ===\n",
-                    _f("Interested",       fields.get("ll_interested")),
-                    _f("Follow-Up Date",   fields.get("ll_follow_up_date")),
-                    _f("Booking Requested",fields.get("ll_booking_requested")),
-                    _f("Notes",            fields.get("ll_notes")),
-                    "\n=== Health Assessment Screening ===\n",
-                    _f("Interested",       fields.get("has_interested")),
-                    _f("Follow-Up Date",   fields.get("has_follow_up_date")),
-                    _f("Booking Requested",fields.get("has_booking_requested")),
-                    _f("Notes",            fields.get("has_notes")),
-                    "\n=== Mobile Massage Service ===\n",
-                    _f("Interested",       fields.get("mms_interested")),
-                    _f("Follow-Up Date",   fields.get("mms_follow_up_date")),
-                    _f("Booking Requested",fields.get("mms_booking_requested")),
-                    _f("Notes",            fields.get("mms_notes")),
-                    "\n",
-                    _f("Consultations Gifted", fields.get("consultations_gifted")),
-                    _f("Massages Gifted",       fields.get("massages_gifted")),
-                ]
-            elif form_type == "External Event":
-                lines += [
-                    _f("Event Name",      fields.get("event_name")),
-                    _f("Event Type",      fields.get("event_type")),
-                    _f("Organizer",       fields.get("event_organizer")),
-                    _f("Organizer Phone", fields.get("organizer_phone")),
-                    _f("Cost",            fields.get("event_cost")),
-                    _f("Date & Time",     fields.get("event_datetime")),
-                    _f("Duration",        fields.get("event_duration")),
-                    _f("Venue Address",   fields.get("venue_address")),
-                    _f("Indoor/Outdoor",  fields.get("indoor_outdoor")),
-                    _f("Electricity",     fields.get("has_electricity")),
-                    _f("Staff Type",      fields.get("staff_collar")),
-                    _f("Healthcare Ins.", fields.get("healthcare_insurance")),
-                    _f("Industry",        fields.get("company_industry")),
-                    _f("Event Flyer",     flyer_url),
-                    "",
-                    "--- Interaction ---",
-                    _f("Type",            fields.get("interaction_type")),
-                    _f("Outcome",         fields.get("interaction_outcome")),
-                    _f("Contact Person",  fields.get("interaction_person")),
-                    _f("Follow-Up",       fields.get("interaction_follow_up")),
-                    _f("What Happened",   fields.get("interaction_summary")),
-                ]
-            elif form_type == "Mobile Massage Service":
-                lines += [
-                    _f("Company",          fields.get("company_name")),
-                    _f("Contact",          fields.get("point_of_contact_name")),
-                    _f("Phone",            fields.get("contact_phone")),
-                    _f("Email",            fields.get("contact_email")),
-                    _f("Venue Address",    fields.get("venue_address")),
-                    _f("Indoor/Outdoor",   fields.get("indoor_outdoor")),
-                    _f("Electricity",      fields.get("has_electricity")),
-                    _f("Audience Type",    fields.get("audience_type")),
-                    _f("Anticipated",      fields.get("anticipated_count")),
-                    _f("Industry",         fields.get("company_industry")),
-                    _f("Products/Services",fields.get("products_services")),
-                    _f("Massage Duration", fields.get("massage_duration")),
-                    _f("Massage Type",     fields.get("massage_type")),
-                    _f("Requested Date",   fields.get("requested_datetime")),
-                ]
-            elif form_type == "Lunch and Learn":
-                lines += [
-                    _f("Company",           fields.get("company_name")),
-                    _f("Contact",           fields.get("point_of_contact_name")),
-                    _f("Phone",             fields.get("contact_phone")),
-                    _f("Email",             fields.get("contact_email")),
-                    _f("Venue Address",     fields.get("venue_address")),
-                    _f("Indoor/Outdoor",    fields.get("indoor_outdoor")),
-                    _f("Electricity",       fields.get("has_electricity")),
-                    _f("Conference Room",   fields.get("has_conference_room")),
-                    _f("Food Surfaces",     fields.get("has_food_surfaces")),
-                    _f("Projector/Screen",  fields.get("has_projector")),
-                    _f("Anticipated",       fields.get("anticipated_count")),
-                    _f("Dietary Restrict.", fields.get("dietary_restrictions")),
-                    _f("Staff Type",        fields.get("staff_collar")),
-                    _f("Healthcare Ins.",   fields.get("healthcare_insurance")),
-                    _f("Industry",          fields.get("company_industry")),
-                    _f("Products/Services", fields.get("products_services")),
-                    _f("Requested Date",    fields.get("requested_datetime")),
-                ]
-            elif form_type == "Health Assessment Screening":
-                lines += [
-                    _f("Company",           fields.get("company_name")),
-                    _f("Contact",           fields.get("point_of_contact_name")),
-                    _f("Phone",             fields.get("contact_phone")),
-                    _f("Email",             fields.get("contact_email")),
-                    _f("Venue Address",     fields.get("venue_address")),
-                    _f("Indoor/Outdoor",    fields.get("indoor_outdoor")),
-                    _f("Electricity",       fields.get("has_electricity")),
-                    _f("Anticipated",       fields.get("anticipated_count")),
-                    _f("Staff Type",        fields.get("staff_collar")),
-                    _f("Healthcare Ins.",   fields.get("healthcare_insurance")),
-                    _f("Industry",          fields.get("company_industry")),
-                    _f("Products/Services", fields.get("products_services")),
-                    _f("Requested Date",    fields.get("requested_datetime")),
-                ]
-            else:
-                for k, v in fields.items():
-                    lines.append(_f(k, v))
-
-            summary = "".join(l for l in lines if l is not None).strip()
-
-            # ── Derive date, contact, follow-up, outcome ───────────────────────
-            if form_type == "Business Outreach Log":
-                activity_date  = today
-                contact_person = fields.get("point_of_contact_name", "")
-                follow_up      = next(
-                    (d for d in [
-                        fields.get("ll_follow_up_date"),
-                        fields.get("has_follow_up_date"),
-                        fields.get("mms_follow_up_date"),
-                    ] if d),
-                    None,
-                )
-                outcome = "Visit Logged"
-            elif form_type == "External Event":
-                raw_dt         = fields.get("event_datetime") or ""
-                activity_date  = raw_dt[:10] if raw_dt else today
-                contact_person = fields.get("interaction_person") or fields.get("event_organizer", "")
-                follow_up      = fields.get("interaction_follow_up") or None
-                outcome        = fields.get("interaction_outcome") or "Event Logged"
-            else:
-                raw_dt         = fields.get("requested_datetime") or ""
-                activity_date  = raw_dt[:10] if raw_dt else today
-                contact_person = fields.get("point_of_contact_name", "")
-                follow_up      = None
-                outcome        = "Booking Requested"
-
-            # ── Create T_GOR_ACTS record ───────────────────────────────────────
-            VALID_TYPES = {
-                "Business Outreach Log", "External Event",
-                "Mobile Massage Service", "Lunch and Learn",
-                "Health Assessment Screening",
-            }
-            type_value = form_type if form_type in VALID_TYPES else "Other"
-            if type_value == "Other":
-                summary = f"[Form Type: {form_type}]\n" + summary
-
-            # For External Event, prepend interaction notes to summary
-            if form_type == "External Event":
-                int_type = fields.get("interaction_type", "")
-                int_summary = fields.get("interaction_summary", "")
-                if int_summary:
-                    summary = f"[{int_type}] {int_summary}\n\n{summary}"
-
-            act_fields: dict = {
-                "Type":           {"value": type_value},
-                "Date":           activity_date,
-                "Contact Person": contact_person,
-                "Summary":        summary,
-                "Outcome":        outcome,
-            }
-            if venue_id:
-                act_fields["Business"]      = [{"id": venue_id}]
-            if follow_up:
-                act_fields["Follow-Up Date"] = follow_up
-            if form_type == "External Event":
-                event_status = (fields.get("event_status") or "Prospective").strip()
-                valid_statuses = {"Prospective", "Approved", "Scheduled", "Completed"}
-                if event_status in valid_statuses:
-                    act_fields["Event Status"] = {"value": event_status}
-
-            ar = await client.post(
-                f"{br}/api/database/rows/table/{T_GOR_ACTS}/?user_field_names=true",
-                headers=br_headers,
-                json=act_fields,
-            )
-            # If Type option unknown, retry with "Other" fallback
-            if ar.status_code not in (200, 201) and type_value != "Other":
-                act_fields["Type"]    = {"value": "Other"}
-                act_fields["Summary"] = f"[Form Type: {form_type}]\n" + summary
-                ar = await client.post(
-                    f"{br}/api/database/rows/table/{T_GOR_ACTS}/?user_field_names=true",
-                    headers=br_headers,
-                    json=act_fields,
-                )
-
-        if ar.status_code not in (200, 201):
-            return JSONResponse({"ok": False, "error": ar.text}, status_code=500)
-
-        activity_id = ar.json().get("id")
-
-        # ── Auto-create T_EVENTS row for event-type forms ────────────────────
-        event_id = None
-        EVENT_FORM_TYPES = {"External Event", "Mobile Massage Service", "Lunch and Learn", "Health Assessment Screening"}
-        if T_EVENTS and form_type in EVENT_FORM_TYPES:
-            import hashlib
-            slug = hashlib.sha256(f"{form_type}-{today}-{secrets.token_urlsafe(8)}".encode()).hexdigest()[:12]
-            ev_fields = {
-                "Name": fields.get("event_name") or fields.get("company") or f"{form_type} - {today}",
-                "Event Type": {"value": form_type},
-                "Event Date": fields.get("event_date") or today,
-                "Form Slug": slug,
-                "Created By": user_name or session.get("email", ""),
-                "Lead Count": 0,
-            }
-            if form_type == "External Event":
-                ev_status = (fields.get("event_status") or "Prospective").strip()
-                if ev_status in {"Prospective", "Approved", "Scheduled", "Completed"}:
-                    ev_fields["Event Status"] = {"value": ev_status}
-                if fields.get("organizer"):
-                    ev_fields["Organizer"] = fields["organizer"]
-                if fields.get("organizer_phone"):
-                    ev_fields["Organizer Phone"] = fields["organizer_phone"]
-                if fields.get("cost"):
-                    ev_fields["Cost"] = fields["cost"]
-                if fields.get("duration"):
-                    ev_fields["Duration"] = fields["duration"]
-                if flyer_url:
-                    ev_fields["Flyer URL"] = flyer_url
-            else:
-                ev_fields["Event Status"] = {"value": "Scheduled"}
-            if fields.get("address") or fields.get("event_address"):
-                ev_fields["Venue Address"] = fields.get("address") or fields.get("event_address")
-            if fields.get("anticipated_count"):
-                try:
-                    ev_fields["Anticipated Count"] = int(fields["anticipated_count"])
-                except (ValueError, TypeError):
-                    pass
-            if fields.get("staff_type"):
-                ev_fields["Staff Type"] = fields["staff_type"]
-            if fields.get("industry"):
-                ev_fields["Industry"] = fields["industry"]
-            if fields.get("indoor_outdoor"):
-                ev_fields["Indoor Outdoor"] = {"value": fields["indoor_outdoor"]}
-            if venue_id:
-                ev_fields["Business"] = [{"id": venue_id}]
-            try:
-                er = await client.post(
-                    f"{br}/api/database/rows/table/{T_EVENTS}/?user_field_names=true",
-                    headers=br_headers,
-                    json=ev_fields,
-                )
-                if er.status_code in (200, 201):
-                    event_id = er.json().get("id")
+                hub_cache.pop(f"table:{tid}", None)
             except Exception:
                 pass
 
-        return JSONResponse({"ok": True, "activity_id": activity_id, "event_id": event_id})
-
-    # ── Massage Box CRUD ──────────────────────────────────────────────────────
     @fapp.post("/api/guerilla/boxes")
     async def create_box(request: Request):
-        from datetime import date as _date
         session = _get_session(request)
         if not session:
             return JSONResponse({"ok": False, "error": "unauthenticated"}, status_code=401)
-        if not _has_hub_access(session, "guerilla"):
-            return JSONResponse({"ok": False, "error": "forbidden"}, status_code=403)
         env = _env()
-        br, bt = env["br"], env["bt"]
-        body = await request.json()
-        venue_id = body.get("venue_id")
-        location = (body.get("location") or "").strip()
-        contact_person = (body.get("contact_person") or "").strip()
-        pickup_days = body.get("pickup_days")
-        promo_items = (body.get("promo_items") or "").strip()
-        if not venue_id:
-            return JSONResponse({"ok": False, "error": "venue_id required"}, status_code=400)
-        today = _date.today().isoformat()
-        box_fields = {
-            "Business": [int(venue_id)],
-            "Status": "Active",
-            "Date Placed": today,
-        }
-        if location:
-            box_fields["Location Notes"] = location
-        if contact_person:
-            box_fields["Contact Person"] = contact_person
-        if pickup_days:
-            box_fields["Pickup Days"] = int(pickup_days)
-        if promo_items:
-            box_fields["Promo Items"] = promo_items
-        async with httpx.AsyncClient(timeout=30) as client:
-            r = await client.post(
-                f"{br}/api/database/rows/table/{T_GOR_BOXES}/?user_field_names=true",
-                headers={"Authorization": f"Token {bt}", "Content-Type": "application/json"},
-                json=box_fields,
-            )
-        if r.status_code not in (200, 201):
-            return JSONResponse({"ok": False, "error": r.text}, status_code=500)
-        try:
-            hub_cache.pop(f"table:{T_GOR_BOXES}", None)
-        except Exception:
-            pass
-        return JSONResponse({"ok": True, "box_id": r.json().get("id")})
+        resp = await guerilla_api.create_box(request, env["br"], env["bt"], session)
+        _invalidate(T_GOR_BOXES)
+        return resp
 
     @fapp.patch("/api/guerilla/boxes/{box_id}/pickup")
     async def pickup_box(request: Request, box_id: int):
-        from datetime import date as _date
         session = _get_session(request)
         if not session:
             return JSONResponse({"ok": False, "error": "unauthenticated"}, status_code=401)
-        # Field reps with guerilla access can pick up boxes from their routes.
-        if not _has_hub_access(session, "guerilla"):
-            return JSONResponse({"ok": False, "error": "forbidden"}, status_code=403)
         env = _env()
-        async with httpx.AsyncClient(timeout=30) as client:
-            await client.patch(
-                f"{env['br']}/api/database/rows/table/{T_GOR_BOXES}/{box_id}/?user_field_names=true",
-                headers={"Authorization": f"Token {env['bt']}", "Content-Type": "application/json"},
-                json={"Status": "Picked Up", "Date Removed": _date.today().isoformat()},
-            )
-        try:
-            hub_cache.pop(f"table:{T_GOR_BOXES}")
-        except Exception:
-            pass
-        return JSONResponse({"ok": True})
+        resp = await guerilla_api.pickup_box(request, env["br"], env["bt"], session, box_id)
+        _invalidate(T_GOR_BOXES)
+        return resp
 
     @fapp.patch("/api/guerilla/venues/{venue_id}")
     async def update_venue(request: Request, venue_id: int):
-        """Edit a guerilla venue's Promo Items (and other future fields)."""
         session = _get_session(request)
         if not session:
             return JSONResponse({"ok": False, "error": "unauthenticated"}, status_code=401)
-        if not _has_hub_access(session, "guerilla"):
-            return JSONResponse({"ok": False, "error": "forbidden"}, status_code=403)
-        body = await request.json()
-        fields: dict = {}
-        if "promo_items" in body:
-            fields["Promo Items"] = (body.get("promo_items") or "").strip()
-        if not fields:
-            return JSONResponse({"ok": False, "error": "no fields to update"}, status_code=400)
-        env = _env()
-        async with httpx.AsyncClient(timeout=30) as client:
-            r = await client.patch(
-                f"{env['br']}/api/database/rows/table/{T_GOR_VENUES}/{venue_id}/?user_field_names=true",
-                headers={"Authorization": f"Token {env['bt']}", "Content-Type": "application/json"},
-                json=fields,
-            )
-        if r.status_code != 200:
-            return JSONResponse({"ok": False, "error": r.text[:300]}, status_code=r.status_code)
-        try:
-            hub_cache.pop(f"table:{T_GOR_VENUES}", None)
-        except Exception:
-            pass
-        return JSONResponse({"ok": True})
+        resp = await guerilla_api.update_venue(request, _env()["br"], _env()["bt"], session, venue_id)
+        _invalidate(T_GOR_VENUES)
+        return resp
 
     @fapp.patch("/api/guerilla/boxes/{box_id}")
     async def update_box(request: Request, box_id: int):
-        """General edit: location, contact, pickup_days. All optional."""
         session = _get_session(request)
         if not session:
             return JSONResponse({"ok": False, "error": "unauthenticated"}, status_code=401)
-        if not _has_hub_access(session, "guerilla"):
-            return JSONResponse({"ok": False, "error": "forbidden"}, status_code=403)
-        body = await request.json()
-        fields: dict = {}
-        if "location" in body:
-            fields["Location Notes"] = (body.get("location") or "").strip()
-        if "contact_person" in body:
-            fields["Contact Person"] = (body.get("contact_person") or "").strip()
-        if "promo_items" in body:
-            fields["Promo Items"] = (body.get("promo_items") or "").strip()
-        if "pickup_days" in body and body.get("pickup_days"):
-            try:
-                pd = int(body["pickup_days"])
-                if pd >= 1:
-                    fields["Pickup Days"] = pd
-            except (ValueError, TypeError):
-                return JSONResponse({"ok": False, "error": "invalid pickup_days"}, status_code=400)
-        if not fields:
-            return JSONResponse({"ok": False, "error": "no fields to update"}, status_code=400)
         env = _env()
-        async with httpx.AsyncClient(timeout=30) as client:
-            r = await client.patch(
-                f"{env['br']}/api/database/rows/table/{T_GOR_BOXES}/{box_id}/?user_field_names=true",
-                headers={"Authorization": f"Token {env['bt']}", "Content-Type": "application/json"},
-                json=fields,
-            )
-        if r.status_code != 200:
-            return JSONResponse({"ok": False, "error": r.text[:300]}, status_code=r.status_code)
-        try:
-            hub_cache.pop(f"table:{T_GOR_BOXES}", None)
-        except Exception:
-            pass
-        return JSONResponse({"ok": True})
+        resp = await guerilla_api.update_box(request, env["br"], env["bt"], session, box_id)
+        _invalidate(T_GOR_BOXES)
+        return resp
 
     @fapp.patch("/api/guerilla/boxes/{box_id}/days")
     async def update_box_days(request: Request, box_id: int):
         session = _get_session(request)
         if not session:
             return JSONResponse({"ok": False, "error": "unauthenticated"}, status_code=401)
-        if not _has_hub_access(session, "guerilla"):
-            return JSONResponse({"ok": False, "error": "forbidden"}, status_code=403)
-        body = await request.json()
-        days = body.get("pickup_days")
-        if not days or int(days) < 1:
-            return JSONResponse({"ok": False, "error": "invalid days"}, status_code=400)
         env = _env()
-        async with httpx.AsyncClient(timeout=30) as client:
-            await client.patch(
-                f"{env['br']}/api/database/rows/table/{T_GOR_BOXES}/{box_id}/?user_field_names=true",
-                headers={"Authorization": f"Token {env['bt']}", "Content-Type": "application/json"},
-                json={"Pickup Days": int(days)},
-            )
-        try:
-            hub_cache.pop(f"table:{T_GOR_BOXES}")
-        except Exception:
-            pass
-        return JSONResponse({"ok": True})
+        resp = await guerilla_api.update_box_days(request, env["br"], env["bt"], session, box_id)
+        _invalidate(T_GOR_BOXES)
+        return resp
 
     # ── Route API Endpoints ───────────────────────────────────────────────────
+    async def _hub_cached_rows(tid: int) -> list:
+        env = _env()
+        return await _cached_table(tid, env["br"], env["bt"])
+
     @fapp.get("/api/guerilla/routes/today")
     async def routes_today(request: Request):
         session = _get_session(request)
         if not session:
             return JSONResponse({"error": "unauthenticated"}, status_code=401)
-        if not T_GOR_ROUTES or not T_GOR_ROUTE_STOPS:
-            return JSONResponse({"route": None, "stops": []})
         env = _env()
-        user_email = session.get("email", "")
-        import datetime
-        today = datetime.date.today().isoformat()
-        try:
-            routes = await _cached_table(T_GOR_ROUTES, env["br"], env["bt"])
-            # Find active/draft route for today, or fall back to most recent
-            route = None
-            for row in routes:
-                row_date  = (row.get("Date") or "")[:10]
-                row_email = (row.get("Assigned To") or "").strip().lower()
-                row_status = row.get("Status") or ""
-                if isinstance(row_status, dict): row_status = row_status.get("value", "")
-                if row_date == today and row_email == user_email.lower() and row_status in ("Active", "Draft"):
-                    route = row
-                    break
-            # Fallback: most recent route for this user
-            if not route:
-                candidates = []
-                for row in routes:
-                    row_email = (row.get("Assigned To") or "").strip().lower()
-                    row_status = row.get("Status") or ""
-                    if isinstance(row_status, dict): row_status = row_status.get("value", "")
-                    if row_email == user_email.lower() and row_status in ("Active", "Draft"):
-                        candidates.append(row)
-                candidates.sort(key=lambda r: r.get("Date") or "", reverse=True)
-                if candidates:
-                    route = candidates[0]
-            if not route:
-                return JSONResponse({"route": None, "stops": []})
-            route_id = route.get("id")
-            stops_all = await _cached_table(T_GOR_ROUTE_STOPS, env["br"], env["bt"])
-            stops = [s for s in stops_all if any(
-                (isinstance(v, dict) and v.get("id") == route_id) or v == route_id
-                for v in (s.get("Route") or [])
-            )]
-            stops.sort(key=lambda s: s.get("Stop Order") or 999)
-            venues = await _cached_table(T_GOR_VENUES, env["br"], env["bt"])
-            venue_map = {v["id"]: v for v in venues}
-            # Build map of venue_id -> pending box (Active + overdue by Pickup Days)
-            boxes = await _cached_table(T_GOR_BOXES, env["br"], env["bt"])
-            from datetime import date as _d
-            today_d = _d.today()
-            pending_box_by_venue = {}
-            for b in boxes:
-                b_status = b.get("Status") or ""
-                if isinstance(b_status, dict): b_status = b_status.get("value", "")
-                if b_status != "Active":
-                    continue
-                placed = b.get("Date Placed")
-                if not placed:
-                    continue
-                try:
-                    placed_d = _d.fromisoformat(str(placed)[:10])
-                    age = (today_d - placed_d).days
-                except Exception:
-                    continue
-                pickup_days = b.get("Pickup Days")
-                try:
-                    pickup_days = int(pickup_days) if pickup_days else 14
-                except Exception:
-                    pickup_days = 14
-                if age < pickup_days:
-                    continue
-                # Extract venue_id from Business link_row
-                biz = b.get("Business") or []
-                v_id = None
-                for v in biz:
-                    if isinstance(v, dict): v_id = v.get("id"); break
-                    v_id = v; break
-                if v_id:
-                    # Keep the oldest pending box if multiple
-                    existing = pending_box_by_venue.get(v_id)
-                    if not existing or age > existing["age"]:
-                        pending_box_by_venue[v_id] = {
-                            "box_id": b.get("id"), "age": age,
-                            "overdue_by": age - pickup_days,
-                            "location": b.get("Location Notes") or "",
-                        }
-
-            stop_list = []
-            for s in stops:
-                venue_id = None
-                for v in (s.get("Venue") or []):
-                    if isinstance(v, dict): venue_id = v.get("id"); break
-                    venue_id = v; break
-                venue = venue_map.get(venue_id, {}) if venue_id else {}
-                status = s.get("Status") or ""
-                if isinstance(status, dict): status = status.get("value", "Pending")
-                pending_box = pending_box_by_venue.get(venue_id) if venue_id else None
-                stop_list.append({
-                    "stop_id": s.get("id"),
-                    "venue_id": venue_id,
-                    "name": venue.get("Name") or "",
-                    "address": venue.get("Address") or "",
-                    "lat": venue.get("Latitude"),
-                    "lng": venue.get("Longitude"),
-                    "status": status or "Pending",
-                    "order": s.get("Stop Order") or 0,
-                    "notes": s.get("Notes") or "",
-                    "pending_box": pending_box,  # None or {box_id, age, overdue_by, location}
-                })
-            route_status = route.get("Status") or ""
-            if isinstance(route_status, dict): route_status = route_status.get("value", "")
-            return JSONResponse({
-                "route": {"id": route_id, "name": route.get("Name") or route.get("Route Name") or "Route", "status": route_status},
-                "stops": stop_list,
-            })
-        except Exception as e:
-            return JSONResponse({"error": str(e)}, status_code=500)
+        return await guerilla_api.routes_today(request, env["br"], env["bt"], session,
+                                               _hub_cached_rows)
 
     @fapp.patch("/api/guerilla/routes/stops/{stop_id}")
     async def update_route_stop(request: Request, stop_id: int):
-        from datetime import datetime as _dt
         session = _get_session(request)
         if not session:
             return JSONResponse({"error": "unauthenticated"}, status_code=401)
-        if not _has_hub_access(session, "guerilla"):
-            return JSONResponse({"error": "forbidden"}, status_code=403)
-        body = await request.json()
-        status = body.get("status", "")
-        notes = (body.get("notes") or "").strip()
-        lat = body.get("lat")
-        lng = body.get("lng")
-        if status not in ("Pending", "Visited", "Skipped", "Not Reached"):
-            return JSONResponse({"error": "invalid status"}, status_code=400)
         env = _env()
-        fields = {"Status": status}
-        if notes:
-            fields["Notes"] = notes
-        if status in ("Visited", "Skipped", "Not Reached"):
-            fields["Completed At"] = _dt.now().strftime("%Y-%m-%d %H:%M")
-            fields["Completed By"] = session.get("email", "")
-        # Only record GPS coords on Visited (Skipped/Not Reached don't have a
-        # physical check-in)
-        if status == "Visited" and isinstance(lat, (int, float)) and isinstance(lng, (int, float)):
-            fields["Check-In Lat"] = lat
-            fields["Check-In Lng"] = lng
-        async with httpx.AsyncClient(timeout=30) as client:
-            await client.patch(
-                f"{env['br']}/api/database/rows/table/{T_GOR_ROUTE_STOPS}/{stop_id}/?user_field_names=true",
-                headers={"Authorization": f"Token {env['bt']}", "Content-Type": "application/json"},
-                json=fields,
-            )
-        hub_cache.pop(f"table:{T_GOR_ROUTE_STOPS}", None)
-        return JSONResponse({"ok": True})
+        resp = await guerilla_api.update_route_stop(request, env["br"], env["bt"], session, stop_id)
+        _invalidate(T_GOR_ROUTE_STOPS)
+        return resp
 
     @fapp.post("/api/guerilla/routes")
     async def gorilla_routes_create(request: Request):
         session = _get_session(request)
         if not session:
             return JSONResponse({"error": "unauthenticated"}, status_code=401)
-        if not _is_admin(session):
-            return JSONResponse({"error": "admin only"}, status_code=403)
-        if not T_GOR_ROUTES or not T_GOR_ROUTE_STOPS:
-            return JSONResponse({"error": "routes not configured"}, status_code=503)
         env = _env()
-        body = await request.json()
-        name     = (body.get("name") or "").strip()
-        date_str = (body.get("date") or "").strip()
-        assignee = (body.get("assigned_to") or "").strip()
-        status   = body.get("status") or "Draft"
-        stops    = body.get("stops") or []
-        if not name:
-            return JSONResponse({"error": "name required"}, status_code=400)
-        if status not in ("Draft", "Active", "Completed"):
-            status = "Draft"
-        async with httpx.AsyncClient() as client:
-            route_payload = {"Name": name, "Assigned To": assignee, "Status": status}
-            if date_str:
-                route_payload["Date"] = date_str
-            r = await client.post(
-                f"{env['br']}/api/database/rows/table/{T_GOR_ROUTES}/?user_field_names=true",
-                headers={"Authorization": f"Token {env['bt']}", "Content-Type": "application/json"},
-                json=route_payload,
-            )
-            if r.status_code not in (200, 201):
-                return JSONResponse({"error": r.text}, status_code=r.status_code)
-            route_id = r.json()["id"]
-            for i, stop in enumerate(stops):
-                venue_id = stop.get("venue_id")
-                if not venue_id:
-                    continue
-                stop_payload = {
-                    "Route": [route_id],
-                    "Stop Order": i + 1,
-                    "Status": "Pending",
-                    "Name": stop.get("name") or "",
-                }
-                # Only link Venue if it's a guerilla venue (T_GOR_VENUES link)
-                # For other tool types, just store the name
-                try:
-                    stop_payload["Venue"] = [int(venue_id)]
-                except (ValueError, TypeError):
-                    pass
-                await client.post(
-                    f"{env['br']}/api/database/rows/table/{T_GOR_ROUTE_STOPS}/?user_field_names=true",
-                    headers={"Authorization": f"Token {env['bt']}", "Content-Type": "application/json"},
-                    json=stop_payload,
-                )
-        hub_cache.pop(f"table:{T_GOR_ROUTES}", None)
-        hub_cache.pop(f"table:{T_GOR_ROUTE_STOPS}", None)
-        return JSONResponse({"ok": True, "route_id": route_id})
+        resp = await guerilla_api.gorilla_routes_create(request, env["br"], env["bt"], session)
+        _invalidate(T_GOR_ROUTES, T_GOR_ROUTE_STOPS)
+        return resp
 
     @fapp.patch("/api/guerilla/routes/{route_id}/status")
     async def gorilla_route_status(request: Request, route_id: int):
         session = _get_session(request)
         if not session:
             return JSONResponse({"error": "unauthenticated"}, status_code=401)
-        if not _is_admin(session):
-            return JSONResponse({"error": "admin only"}, status_code=403)
-        if not T_GOR_ROUTES:
-            return JSONResponse({"error": "routes not configured"}, status_code=503)
         env = _env()
-        body = await request.json()
-        new_status = body.get("status", "")
-        if new_status not in ("Draft", "Active", "Completed"):
-            return JSONResponse({"error": "invalid status"}, status_code=400)
-        async with httpx.AsyncClient() as client:
-            r = await client.patch(
-                f"{env['br']}/api/database/rows/table/{T_GOR_ROUTES}/{route_id}/?user_field_names=true",
-                headers={"Authorization": f"Token {env['bt']}", "Content-Type": "application/json"},
-                json={"Status": new_status},
-            )
-        hub_cache.pop(f"table:{T_GOR_ROUTES}", None)
-        if r.status_code in (200, 201):
-            return JSONResponse({"ok": True})
-        return JSONResponse({"error": r.text}, status_code=r.status_code)
+        resp = await guerilla_api.gorilla_route_status(request, env["br"], env["bt"], session, route_id)
+        _invalidate(T_GOR_ROUTES)
+        return resp
 
     @fapp.patch("/api/guerilla/routes/{route_id}")
     async def gorilla_route_update(request: Request, route_id: int):
         session = _get_session(request)
         if not session:
             return JSONResponse({"error": "unauthenticated"}, status_code=401)
-        if not _is_admin(session):
-            return JSONResponse({"error": "admin only"}, status_code=403)
-        if not T_GOR_ROUTES or not T_GOR_ROUTE_STOPS:
-            return JSONResponse({"error": "routes not configured"}, status_code=503)
         env = _env()
-        body = await request.json()
-        # Build route patch payload from optional fields
-        route_patch = {}
-        if "name" in body:
-            route_patch["Name"] = (body["name"] or "").strip()
-        if "date" in body:
-            route_patch["Date"] = (body["date"] or "").strip() or None
-        if "assigned_to" in body:
-            route_patch["Assigned To"] = (body["assigned_to"] or "").strip()
-        if "status" in body:
-            s = body["status"]
-            if s in ("Draft", "Active", "Completed"):
-                route_patch["Status"] = s
-        async with httpx.AsyncClient(timeout=30) as client:
-            if route_patch:
-                r = await client.patch(
-                    f"{env['br']}/api/database/rows/table/{T_GOR_ROUTES}/{route_id}/?user_field_names=true",
-                    headers={"Authorization": f"Token {env['bt']}", "Content-Type": "application/json"},
-                    json=route_patch,
-                )
-                if r.status_code not in (200, 201):
-                    return JSONResponse({"error": r.text}, status_code=r.status_code)
-            # If stops provided, replace them: delete existing, create new
-            if "stops" in body:
-                new_stops = body["stops"] or []
-                # Fetch existing stops for this route
-                cached_entry = hub_cache.get(f"table:{T_GOR_ROUTE_STOPS}")
-                if cached_entry and isinstance(cached_entry, dict) and "data" in cached_entry:
-                    all_stops = cached_entry["data"]
-                elif cached_entry and isinstance(cached_entry, list):
-                    all_stops = cached_entry
-                else:
-                    all_stops = []
-                    url = f"{env['br']}/api/database/rows/table/{T_GOR_ROUTE_STOPS}/?user_field_names=true&size=200"
-                    while url:
-                        sr = await client.get(url, headers={"Authorization": f"Token {env['bt']}"})
-                        if sr.status_code != 200:
-                            break
-                        data = sr.json()
-                        all_stops.extend(data.get("results", []))
-                        url = data.get("next")
-                old_stops = [s for s in all_stops
-                             if any(x.get("id") == route_id for x in (s.get("Route") or []))]
-                # Delete old stops
-                for s in old_stops:
-                    await client.delete(
-                        f"{env['br']}/api/database/rows/table/{T_GOR_ROUTE_STOPS}/{s['id']}/",
-                        headers={"Authorization": f"Token {env['bt']}"},
-                    )
-                # Create new stops
-                for i, stop in enumerate(new_stops):
-                    venue_id = stop.get("venue_id")
-                    if not venue_id:
-                        continue
-                    stop_payload = {
-                        "Route": [route_id],
-                        "Stop Order": i + 1,
-                        "Status": "Pending",
-                        "Name": stop.get("name") or "",
-                    }
-                    try:
-                        stop_payload["Venue"] = [int(venue_id)]
-                    except (ValueError, TypeError):
-                        pass
-                    await client.post(
-                        f"{env['br']}/api/database/rows/table/{T_GOR_ROUTE_STOPS}/?user_field_names=true",
-                        headers={"Authorization": f"Token {env['bt']}", "Content-Type": "application/json"},
-                        json=stop_payload,
-                    )
-        hub_cache.pop(f"table:{T_GOR_ROUTES}", None)
-        hub_cache.pop(f"table:{T_GOR_ROUTE_STOPS}", None)
-        return JSONResponse({"ok": True})
+        resp = await guerilla_api.gorilla_route_update(request, env["br"], env["bt"], session,
+                                                       route_id, _hub_cached_rows)
+        _invalidate(T_GOR_ROUTES, T_GOR_ROUTE_STOPS)
+        return resp
 
     @fapp.delete("/api/guerilla/routes/{route_id}")
     async def gorilla_route_delete(request: Request, route_id: int):
         session = _get_session(request)
         if not session:
             return JSONResponse({"error": "unauthenticated"}, status_code=401)
-        if not _is_admin(session):
-            return JSONResponse({"error": "admin only"}, status_code=403)
-        if not T_GOR_ROUTES or not T_GOR_ROUTE_STOPS:
-            return JSONResponse({"error": "routes not configured"}, status_code=503)
         env = _env()
-        async with httpx.AsyncClient(timeout=30) as client:
-            # Fetch and delete all stops linked to this route
-            cached_entry = hub_cache.get(f"table:{T_GOR_ROUTE_STOPS}")
-            if cached_entry and isinstance(cached_entry, dict) and "data" in cached_entry:
-                all_stops = cached_entry["data"]
-            elif cached_entry and isinstance(cached_entry, list):
-                all_stops = cached_entry
-            else:
-                all_stops = []
-                url = f"{env['br']}/api/database/rows/table/{T_GOR_ROUTE_STOPS}/?user_field_names=true&size=200"
-                while url:
-                    sr = await client.get(url, headers={"Authorization": f"Token {env['bt']}"})
-                    if sr.status_code != 200:
-                        break
-                    data = sr.json()
-                    all_stops.extend(data.get("results", []))
-                    url = data.get("next")
-            route_stops = [s for s in all_stops
-                           if any(x.get("id") == route_id for x in (s.get("Route") or []))]
-            for s in route_stops:
-                await client.delete(
-                    f"{env['br']}/api/database/rows/table/{T_GOR_ROUTE_STOPS}/{s['id']}/",
-                    headers={"Authorization": f"Token {env['bt']}"},
-                )
-            # Delete the route itself
-            r = await client.delete(
-                f"{env['br']}/api/database/rows/table/{T_GOR_ROUTES}/{route_id}/",
-                headers={"Authorization": f"Token {env['bt']}"},
-            )
-        hub_cache.pop(f"table:{T_GOR_ROUTES}", None)
-        hub_cache.pop(f"table:{T_GOR_ROUTE_STOPS}", None)
-        if r.status_code in (200, 204):
-            return JSONResponse({"ok": True})
-        return JSONResponse({"error": r.text}, status_code=r.status_code)
+        resp = await guerilla_api.gorilla_route_delete(request, env["br"], env["bt"], session,
+                                                       route_id, _hub_cached_rows)
+        _invalidate(T_GOR_ROUTES, T_GOR_ROUTE_STOPS)
+        return resp
 
     # ── Social Poster Hub ──────────────────────────────────────────────────────
     @fapp.get("/social/poster", response_class=HTMLResponse)
@@ -2241,7 +1537,7 @@ if __name__ == "__main__":
             "client_id":     env["gid"],
             "redirect_uri":  _redirect_uri(request),
             "response_type": "code",
-            "scope":         "openid email profile https://www.googleapis.com/auth/gmail.send https://www.googleapis.com/auth/gmail.readonly",
+            "scope":         "openid email profile https://www.googleapis.com/auth/gmail.send https://www.googleapis.com/auth/gmail.readonly https://www.googleapis.com/auth/calendar.readonly",
             "access_type":   "offline",
             "prompt":        "consent",
             "state":         state,
@@ -2623,8 +1919,6 @@ if __name__ == "__main__":
     async def _root_handler(request: Request):
         user, br, bt = _guard(request)
         if not user: return RedirectResponse(url="/login")
-        if _is_mobile_local(request):
-            return RedirectResponse(url="/m")
         return HTMLResponse(_hub_page(br, bt, user=user))
     local_app.add_api_route("/", _root_handler, methods=["GET"])
 

@@ -344,8 +344,8 @@ function showGorDetail(v) {{
     html += '<hr style="border:none;border-top:1px solid var(--border);margin:10px 0">';
     html += '<div class="sb-section-lbl" style="margin-bottom:6px">Place New Box</div>';
     html += '<div style="display:grid;gap:6px">';
-    html += '<input type="text" id="sb-box-loc-' + id + '" placeholder="Location (e.g. Front desk)" onkeydown="if(event.key===\'Enter\'){{event.preventDefault();placeBoxDesktop(' + id + ');}}" style="background:var(--input-bg);border:1px solid var(--border);color:var(--text);border-radius:7px;padding:6px 10px;font-size:12px">';
-    html += '<input type="text" id="sb-box-contact-' + id + '" placeholder="Contact person" onkeydown="if(event.key===\'Enter\'){{event.preventDefault();placeBoxDesktop(' + id + ');}}" style="background:var(--input-bg);border:1px solid var(--border);color:var(--text);border-radius:7px;padding:6px 10px;font-size:12px">';
+    html += '<input type="text" id="sb-box-loc-' + id + '" placeholder="Location (e.g. Front desk)" onkeydown="if(event.key===\\\'Enter\\\'){{event.preventDefault();placeBoxDesktop(' + id + ');}}" style="background:var(--input-bg);border:1px solid var(--border);color:var(--text);border-radius:7px;padding:6px 10px;font-size:12px">';
+    html += '<input type="text" id="sb-box-contact-' + id + '" placeholder="Contact person" onkeydown="if(event.key===\\\'Enter\\\'){{event.preventDefault();placeBoxDesktop(' + id + ');}}" style="background:var(--input-bg);border:1px solid var(--border);color:var(--text);border-radius:7px;padding:6px 10px;font-size:12px">';
     html += '<button onclick="placeBoxDesktop(' + id + ')" style="background:#059669;color:#fff;border:none;border-radius:7px;padding:7px 12px;cursor:pointer;font-size:12px;font-weight:600">Place Box</button>';
     html += '<div id="sb-box-st-' + id + '" style="font-size:11px;text-align:center;min-height:14px"></div>';
     html += '</div></div>';
@@ -433,8 +433,8 @@ function showGorDetail(v) {{
   html += '<hr style="border:none;border-top:1px solid var(--border);margin:14px 0">';
   html += '<div class="sb-section-lbl" style="margin-bottom:8px">Place New Box</div>';
   html += '<div style="display:grid;gap:8px">';
-  html += '<input type="text" id="sb-box-loc-' + id + '" placeholder="Location (e.g. Front desk, Break room)" onkeydown="if(event.key===\'Enter\'){{event.preventDefault();placeBoxDesktop(' + id + ');}}" style="background:var(--input-bg);border:1px solid var(--border);color:var(--text);border-radius:7px;padding:7px 10px;font-size:13px">';
-  html += '<input type="text" id="sb-box-contact-' + id + '" placeholder="Contact person" onkeydown="if(event.key===\'Enter\'){{event.preventDefault();placeBoxDesktop(' + id + ');}}" style="background:var(--input-bg);border:1px solid var(--border);color:var(--text);border-radius:7px;padding:7px 10px;font-size:13px">';
+  html += '<input type="text" id="sb-box-loc-' + id + '" placeholder="Location (e.g. Front desk, Break room)" onkeydown="if(event.key===\\\'Enter\\\'){{event.preventDefault();placeBoxDesktop(' + id + ');}}" style="background:var(--input-bg);border:1px solid var(--border);color:var(--text);border-radius:7px;padding:7px 10px;font-size:13px">';
+  html += '<input type="text" id="sb-box-contact-' + id + '" placeholder="Contact person" onkeydown="if(event.key===\\\'Enter\\\'){{event.preventDefault();placeBoxDesktop(' + id + ');}}" style="background:var(--input-bg);border:1px solid var(--border);color:var(--text);border-radius:7px;padding:7px 10px;font-size:13px">';
   html += '<button onclick="placeBoxDesktop(' + id + ')" style="background:#059669;color:#fff;border:none;border-radius:7px;padding:7px 12px;cursor:pointer;font-size:12px;font-weight:600">Place Box</button>';
   html += '<div id="sb-box-st-' + id + '" style="font-size:11px;text-align:center;min-height:14px"></div>';
   html += '</div>';

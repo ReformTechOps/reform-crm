@@ -6,12 +6,14 @@
 credentials.json
 token.json
 service_account.json
+chat_service_account.json
 
 # Intermediate files (all temp processing data)
 .tmp/
 
 # Claude Code temporary files
 tmpclaude-*
+.claude/
 
 # Python
 __pycache__/

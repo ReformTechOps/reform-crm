@@ -745,16 +745,55 @@ _GFR_FORMS345_HTML = (
 # GFR Form 2 HTML
 # ---------------------------------------------------------------------------
 _GFR_FORM2_HTML = (
-    # -- Form 2: External Event --------------------------------------------
+    # -- Form 2: External Event / Interaction Only -------------------------
     '<div class="gfr-overlay" id="gfr-form-s2" onclick="if(event.target===this)closeGFRForm(\'s2\')">'
     '<div class="gfr-modal gfr-form-modal">'
     '<div class="gfr-hdr">'
-    '<span class="gfr-hdr-title">External Event</span>'
+    '<span class="gfr-hdr-title">Log Interaction</span>'
     '<span class="gfr-hdr-user" id="gfr-user-s2"></span>'
     '<button class="gfr-close" onclick="closeGFRForm(\'s2\')">&#xd7;</button>'
     '</div>'
     '<div class="gfr-draft-bar" id="gfr-draft-s2">Draft restored <span style="flex:1"></span><button class="gfr-draft-clear" onclick="clearDraft(\'s2\')">Clear</button></div>'
     '<div class="gfr-form-body" id="gfr-body-s2">'
+
+    # -- Interaction Details (always visible, the core of every submission) --
+    '<div class="gfr-section">'
+    '<div class="gfr-section-title">Interaction Details</div>'
+    '<div class="gfr-two">'
+    '<div class="gfr-field"><label class="gfr-label">Interaction Type <span class="req">*</span></label>'
+    '<select class="gfr-select" id="s2-int-type">'
+    '<option value="Drop-In">Drop-In</option><option value="Call">Call</option>'
+    '<option value="Email">Email</option><option value="Meeting">Meeting</option>'
+    '<option value="Mail">Mail</option><option value="Other">Other</option>'
+    '</select></div>'
+    '<div class="gfr-field"><label class="gfr-label">Outcome <span class="req">*</span></label>'
+    '<select class="gfr-select" id="s2-int-outcome">'
+    '<option value="Spoke With">Spoke With</option><option value="No Answer">No Answer</option>'
+    '<option value="Left Message">Left Message</option><option value="Scheduled Meeting">Scheduled Meeting</option>'
+    '<option value="Declined">Declined</option><option value="Follow-Up Needed">Follow-Up Needed</option>'
+    '</select></div>'
+    '</div>'
+    '<div class="gfr-two">'
+    '<div class="gfr-field"><label class="gfr-label">Contact Person</label>'
+    '<input class="gfr-input" id="s2-int-person" type="text" placeholder="Who did you speak with?"></div>'
+    '<div class="gfr-field"><label class="gfr-label">Follow-Up Date</label>'
+    '<input class="gfr-input" id="s2-int-fu" type="date"></div>'
+    '</div>'
+    '<div class="gfr-field"><label class="gfr-label">What happened? <span class="req">*</span></label>'
+    '<textarea class="gfr-textarea" id="s2-int-summary" placeholder="Describe the interaction\u2026"></textarea></div>'
+    '</div>'
+
+    # -- Event toggle ------------------------------------------------------
+    '<div class="gfr-section" style="padding-top:4px">'
+    '<label style="display:flex;align-items:center;gap:10px;cursor:pointer;font-size:14px;font-weight:600">'
+    '<input type="checkbox" id="s2-has-event" onchange="s2ToggleEvent()" style="width:18px;height:18px;cursor:pointer">'
+    '<span>Is there an event here?</span>'
+    '</label>'
+    '<div style="font-size:12px;color:var(--text3);margin-top:4px;margin-left:28px">Check to capture event details (type, date, venue, etc.)</div>'
+    '</div>'
+
+    # -- Event block (hidden by default, shown when checkbox is on) --------
+    '<div id="s2-event-block" style="display:none">'
 
     # Basic Info
     '<div class="gfr-section">'
@@ -790,7 +829,7 @@ _GFR_FORM2_HTML = (
     '</div>'
     '</div>'
 
-    # About Event Venue + Participant Details sections + Event Date & Time
+    # About Event Venue + Participant Details + Event Date & Time
     + _gfr_vb('s2')
     + (
         '<div class="gfr-section">'
@@ -813,33 +852,7 @@ _GFR_FORM2_HTML = (
         '</div>'
     )
     + _gfr_dt('s2')
-    + (
-        '<div class="gfr-section">'
-        '<div class="gfr-section-title">Interaction Details</div>'
-        '<div class="gfr-two">'
-        '<div class="gfr-field"><label class="gfr-label">Interaction Type <span class="req">*</span></label>'
-        '<select class="gfr-select" id="s2-int-type">'
-        '<option value="Drop-In">Drop-In</option><option value="Call">Call</option>'
-        '<option value="Email">Email</option><option value="Meeting">Meeting</option>'
-        '<option value="Mail">Mail</option><option value="Other">Other</option>'
-        '</select></div>'
-        '<div class="gfr-field"><label class="gfr-label">Outcome <span class="req">*</span></label>'
-        '<select class="gfr-select" id="s2-int-outcome">'
-        '<option value="Spoke With">Spoke With</option><option value="No Answer">No Answer</option>'
-        '<option value="Left Message">Left Message</option><option value="Scheduled Meeting">Scheduled Meeting</option>'
-        '<option value="Declined">Declined</option><option value="Follow-Up Needed">Follow-Up Needed</option>'
-        '</select></div>'
-        '</div>'
-        '<div class="gfr-two">'
-        '<div class="gfr-field"><label class="gfr-label">Contact Person</label>'
-        '<input class="gfr-input" id="s2-int-person" type="text" placeholder="Who did you speak with?"></div>'
-        '<div class="gfr-field"><label class="gfr-label">Follow-Up Date</label>'
-        '<input class="gfr-input" id="s2-int-fu" type="date"></div>'
-        '</div>'
-        '<div class="gfr-field"><label class="gfr-label">What happened? <span class="req">*</span></label>'
-        '<textarea class="gfr-textarea" id="s2-int-summary" placeholder="Describe the interaction\u2026"></textarea></div>'
-        '</div>'
-    )
+    + '</div>'   # close s2-event-block
     + '</div>'   # close form-body
     + _gfr_foot('s2', 's2Submit')
     + '</div></div>'  # close modal + overlay
@@ -1017,7 +1030,12 @@ async function s5Submit(){
   await _gfrDoSubmit('s5','Health Assessment Screening',fields,btn);
 }
 
-// -- Form 2: External Event ------------------------------------------------
+// -- Form 2: External Event / Interaction Only ----------------------------
+function s2ToggleEvent(){
+  var cb=document.getElementById('s2-has-event');
+  var block=document.getElementById('s2-event-block');
+  if(block)block.style.display=cb.checked?'':'none';
+}
 function s2Reset(){
   ['s2-event-name','s2-event-type','s2-organizer','s2-org-phone','s2-cost',
    's2-duration','s2-addr','s2-date','s2-industry','s2-int-person','s2-int-fu','s2-int-summary'].forEach(function(id){
@@ -1028,6 +1046,8 @@ function s2Reset(){
   });
   document.querySelectorAll('input[name="s2-collar"],input[name="s2-hcare"]').forEach(function(r){r.checked=false;});
   var flyer=document.getElementById('s2-flyer');if(flyer)flyer.value='';
+  var cb=document.getElementById('s2-has-event');if(cb)cb.checked=false;
+  var block=document.getElementById('s2-event-block');if(block)block.style.display='none';
   var old=document.querySelector('#gfr-form-s2 .gfr-success');if(old)old.remove();
   var body=document.getElementById('gfr-body-s2');if(body)body.style.display='';
   var foot=document.querySelector('#gfr-form-s2 .gfr-footer');if(foot)foot.style.display='';
@@ -1036,46 +1056,59 @@ function s2Reset(){
 }
 async function s2Submit(){
   var btn=document.getElementById('s2-submit');
-  var evtName=document.getElementById('s2-event-name').value.trim();
-  var evtType=document.getElementById('s2-event-type').value.trim();
-  var organizer=document.getElementById('s2-organizer').value.trim();
-  var orgPhone=document.getElementById('s2-org-phone').value.trim();
-  var cost=document.getElementById('s2-cost').value.trim();
-  var duration=document.getElementById('s2-duration').value.trim();
-  var addr=document.getElementById('s2-addr').value.trim();
-  var inout=document.getElementById('s2-inout').value;
-  var elec=document.getElementById('s2-elec').value;
-  var collar=(document.querySelector('input[name="s2-collar"]:checked')||{}).value||'';
-  var hcare=(document.querySelector('input[name="s2-hcare"]:checked')||{}).value||'';
-  var industry=document.getElementById('s2-industry').value.trim();
-  var status=document.getElementById('s2-status').value;
-  var dt=_gfrGetDatetime('s2');
-  var flyer=(document.getElementById('s2-flyer').files||[])[0]||null;
+  // Interaction details — always required
   var intType=document.getElementById('s2-int-type').value;
   var intOutcome=document.getElementById('s2-int-outcome').value;
   var intPerson=document.getElementById('s2-int-person').value.trim();
   var intFu=document.getElementById('s2-int-fu').value;
   var intSummary=document.getElementById('s2-int-summary').value.trim();
-  if(!evtName||!evtType||!organizer||!cost){alert('Please fill in all required Basic Info fields (Name, Type, Organizer, Cost).');return;}
-  if(!addr||!inout||!elec){alert('Please complete the Venue section.');return;}
-  if(!dt){alert('Please select an event date and time.');return;}
-  if(!intSummary){alert('Please describe the interaction in the Interaction Details section.');return;}
-  btn.disabled=true;btn.textContent='Submitting\u2026';
+  if(!intSummary){alert('Please describe the interaction in the "What happened?" field.');return;}
+
+  var hasEvent=document.getElementById('s2-has-event').checked;
+
+  // Build fields based on whether this is event-or-interaction-only
   var fields={
-    event_name:evtName,event_type:evtType,event_organizer:organizer,
-    organizer_phone:orgPhone,event_cost:cost,event_duration:duration,
-    venue_address:addr,indoor_outdoor:inout,has_electricity:elec,
-    staff_collar:collar,healthcare_insurance:hcare,company_industry:industry,
-    event_datetime:dt,event_status:status,
     interaction_type:intType,interaction_outcome:intOutcome,
     interaction_person:intPerson,interaction_follow_up:intFu,
-    interaction_summary:intSummary
+    interaction_summary:intSummary,
+    has_event:hasEvent
   };
+  var formType='Interaction Only';
+  var flyer=null;
+
+  if(hasEvent){
+    var evtName=document.getElementById('s2-event-name').value.trim();
+    var evtType=document.getElementById('s2-event-type').value.trim();
+    var organizer=document.getElementById('s2-organizer').value.trim();
+    var orgPhone=document.getElementById('s2-org-phone').value.trim();
+    var cost=document.getElementById('s2-cost').value.trim();
+    var duration=document.getElementById('s2-duration').value.trim();
+    var addr=document.getElementById('s2-addr').value.trim();
+    var inout=document.getElementById('s2-inout').value;
+    var elec=document.getElementById('s2-elec').value;
+    var collar=(document.querySelector('input[name="s2-collar"]:checked')||{}).value||'';
+    var hcare=(document.querySelector('input[name="s2-hcare"]:checked')||{}).value||'';
+    var industry=document.getElementById('s2-industry').value.trim();
+    var status=document.getElementById('s2-status').value;
+    var dt=_gfrGetDatetime('s2');
+    flyer=(document.getElementById('s2-flyer').files||[])[0]||null;
+    if(!evtName||!evtType||!organizer||!cost){alert('Please fill in all required Basic Info fields (Name, Type, Organizer, Cost).');return;}
+    if(!addr||!inout||!elec){alert('Please complete the Venue section.');return;}
+    if(!dt){alert('Please select an event date and time.');return;}
+    formType='External Event';
+    fields.event_name=evtName;fields.event_type=evtType;fields.event_organizer=organizer;
+    fields.organizer_phone=orgPhone;fields.event_cost=cost;fields.event_duration=duration;
+    fields.venue_address=addr;fields.indoor_outdoor=inout;fields.has_electricity=elec;
+    fields.staff_collar=collar;fields.healthcare_insurance=hcare;fields.company_industry=industry;
+    fields.event_datetime=dt;fields.event_status=status;
+  }
+
+  btn.disabled=true;btn.textContent='Submitting\u2026';
   try{
     var r;
     if(flyer){
       var fd=new FormData();
-      fd.append('form_type','External Event');
+      fd.append('form_type',formType);
       fd.append('fields',JSON.stringify(fields));
       fd.append('user_name',GFR_USER);
       fd.append('flyer',flyer);
@@ -1083,7 +1116,7 @@ async function s2Submit(){
     }else{
       r=await fetch('/api/guerilla/log',{method:'POST',
         headers:{'Content-Type':'application/json'},
-        body:JSON.stringify({form_type:'External Event',fields:fields,user_name:GFR_USER})});
+        body:JSON.stringify({form_type:formType,fields:fields,user_name:GFR_USER})});
     }
     var d=await r.json();
     if(d.ok){_gfrSuccess('s2',d.activity_id);}

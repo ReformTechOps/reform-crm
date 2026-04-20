@@ -4,7 +4,7 @@
 
 You operate within a 3-layer architecture that separates concerns to maximize reliability. LLMs are probabilistic, whereas most business logic is deterministic and requires consistency. This system fixes that mismatch.
 
-## The 3-Layer Architecture
+## The 3-Layer Architectureut 
 
 **Layer 1: Directive (What to do)**
 - Basically just SOPs written in Markdown, live in `directives/`

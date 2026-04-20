@@ -26,36 +26,224 @@ def _info(msg):  print(f"  .... {msg}")
 def _head(msg):  print(f"\n\033[1m{msg}\033[0m")
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 1. JS Syntax Check
+# Source discovery — walk the hub package + entry point
 # ─────────────────────────────────────────────────────────────────────────────
 
-def _extract_js_blocks(source: str) -> list[tuple[str, str]]:
-    """
-    Returns list of (label, js_code) tuples extracted from the Python source.
+def _js_source_files() -> list[Path]:
+    """Every Python file that may contain JS blocks.
 
-    Only extracts named constants (_FOO_JS = \"\"\") — these are plain (non-f)
-    triple-quoted strings whose runtime value is deterministic.  Uses
-    ast.literal_eval so Python escape sequences (e.g. \\\\' → \\') are
-    processed exactly as the interpreter would, giving esprima the same JS
-    the browser receives.
-
-    f-string js blocks are skipped: injected {expr} values can span multiple
-    lines and produce too many false positives when naively replaced with null.
+    Post-refactor, page HTML/JS lives in execution/hub/*.py while the entry
+    point (modal_outreach_hub.py) still hosts OAuth + a few inline scripts.
     """
-    blocks = []
-    for m in re.finditer(r'(\b_\w+_JS)\s*=\s*"""(.*?)"""', source, re.DOTALL):
-        label = m.group(1)
-        raw   = m.group(2)
+    files = []
+    entry = ROOT / "execution" / "modal_outreach_hub.py"
+    if entry.exists():
+        files.append(entry)
+    hub_dir = ROOT / "execution" / "hub"
+    if hub_dir.is_dir():
+        files.extend(sorted(
+            p for p in hub_dir.glob("*.py")
+            if p.name != "__init__.py"
+        ))
+    return files
+
+
+def _rel(p: Path) -> str:
+    try:
+        return str(p.relative_to(ROOT)).replace("\\", "/")
+    except ValueError:
+        return str(p)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# JS block extraction — handles plain, raw, and f-string triple-quoted blocks
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _decode_pystr(text: str) -> str:
+    """Apply Python string-literal escape processing (\\\\ → \\, \\' → ', \\n → LF,
+    \\uXXXX → unicode, etc.) via ast.literal_eval. Returns text unchanged if
+    escape processing would fail (e.g. trailing backslash)."""
+    try:
+        return ast.literal_eval('"""' + text + '"""')
+    except Exception:
+        return text
+
+
+def _flatten_fstring(body: str, raw: bool = False) -> str:
+    """Turn an f-string body into plain JS source:
+      - {{  → literal {
+      - }}  → literal }
+      - {expr} → `null`, with expr's newline count preserved so any esprima
+                 line numbers map back to the true source-file line.
+      - Python escapes on literal segments are processed (\\\\ → \\, \\' → ',
+        \\n → LF, \\uXXXX → unicode) so esprima sees the same text the
+        browser receives — unless `raw=True`, in which case the literal
+        segments are passed through unchanged (matches r\"\"\"...\"\"\" source).
+    Known limitation: a closing `}` inside a string literal inside an
+    expression will confuse the naive depth counter. Rare in practice.
+    """
+    segments = []           # list of ('lit', raw_text) | ('sub', 'null' + '\\n'*N)
+    lit_buf: list[str] = []
+    i, n = 0, len(body)
+
+    def flush_lit():
+        if lit_buf:
+            segments.append(('lit', ''.join(lit_buf)))
+            lit_buf.clear()
+
+    while i < n:
+        c = body[i]
+        if c == '{':
+            if i + 1 < n and body[i + 1] == '{':
+                lit_buf.append('{')
+                i += 2
+                continue
+            flush_lit()
+            depth = 1
+            j = i + 1
+            while j < n and depth > 0:
+                if body[j] == '{':
+                    depth += 1
+                elif body[j] == '}':
+                    depth -= 1
+                    if depth == 0:
+                        break
+                j += 1
+            expr = body[i + 1:j]
+            segments.append(('sub', 'null' + '\n' * expr.count('\n')))
+            i = j + 1
+        elif c == '}':
+            if i + 1 < n and body[i + 1] == '}':
+                lit_buf.append('}')
+                i += 2
+                continue
+            lit_buf.append('}')
+            i += 1
+        else:
+            lit_buf.append(c)
+            i += 1
+    flush_lit()
+
+    out = []
+    for kind, text in segments:
+        if kind == 'lit':
+            out.append(text if raw else _decode_pystr(text))
+        else:
+            out.append(text)
+    return ''.join(out)
+
+
+# Single triple-quoted assignment. We keep every match and filter below; this
+# avoids backtracking through huge HTML/CSS blocks.
+_TRIPLE_RE = re.compile(
+    r'(\b\w+)\s*=\s*([rRfF]{0,2})"""(.*?)"""',
+    re.DOTALL,
+)
+
+# Matches `js` as a name-component (case-insensitive): js, route_js, map_js,
+# _COMPOSE_JS, _JS_SHARED, _GFR_FORMS345_JS, etc.
+_JS_NAME_RE = re.compile(r'(?:^|_)js(?:_|$)', re.IGNORECASE)
+
+# Content sniff: lines that begin with unmistakably JS syntax. Catches named
+# helper snippets (firm_counts_load, prev_rel_badge, etc.) that get
+# interpolated into larger blocks — we need to syntax-check them directly
+# because the outer block's f-string substitution wipes them out.
+_JS_HINT_RE = re.compile(
+    r'(?m)^\s*(?:function\s+\w|const\s+\w|let\s+\w|var\s+\w|async\s+function|if\s*\(|for\s*\(|Promise\.)'
+)
+
+
+def _is_js_block(name: str, body: str) -> bool:
+    if _JS_NAME_RE.search(name):
+        return True
+    if _JS_HINT_RE.search(body):
+        return True
+    return False
+
+
+_FORMAT_CALL_RE = re.compile(r'\b(\w+)\.format\s*\(')
+
+
+def _find_format_targets(files: list[Path]) -> set[str]:
+    """Return variable names that are used as `.format()` template strings
+    anywhere in the given files. Those names' triple-quoted bodies need the
+    same {{/}}/{name} flattening as f-strings.
+    """
+    targets = set()
+    for p in files:
         try:
-            # Process escape sequences just as Python does at import time
-            code = ast.literal_eval('"""' + raw + '"""')
+            targets.update(_FORMAT_CALL_RE.findall(p.read_text(encoding='utf-8')))
         except Exception:
-            code = raw  # fallback: use raw bytes
-        blocks.append((label, code))
+            continue
+    return targets
+
+
+def _extract_js_blocks_from_file(path: Path, format_targets: set[str]) -> list[dict]:
+    """Return one dict per JS block in the file.
+
+    Dict shape:
+      file         Path
+      label        variable name (e.g. '_COMPOSE_JS', 'js')
+      kind         'plain' | 'raw' | 'f-string' | 'format'
+      start_line   1-based file line where the block body begins (line of
+                   the opening \"\"\"). esprima line N → file line
+                   start_line + N - 1.
+      code         JS source fed to esprima
+    """
+    try:
+        source = path.read_text(encoding='utf-8')
+    except Exception:
+        return []
+
+    blocks = []
+    for m in _TRIPLE_RE.finditer(source):
+        name = m.group(1)
+        prefix = m.group(2).lower()
+        body = m.group(3)
+        if not _is_js_block(name, body):
+            continue
+        start_line = source[:m.start(3)].count('\n') + 1
+
+        if 'f' in prefix:
+            code = _flatten_fstring(body, raw=False)
+            kind = 'f-string'
+        elif name in format_targets:
+            # String fed to .format() elsewhere — uses the same {{/}}/{name}
+            # placeholder grammar as an f-string. Raw + format is valid and
+            # common (raw avoids doubling backslashes inside the template).
+            code = _flatten_fstring(body, raw=('r' in prefix))
+            kind = 'format'
+        elif 'r' in prefix:
+            code = body
+            kind = 'raw'
+        else:
+            code = _decode_pystr(body)
+            kind = 'plain'
+
+        blocks.append({
+            'file': path,
+            'label': name,
+            'kind': kind,
+            'start_line': start_line,
+            'code': code,
+        })
     return blocks
 
 
-def check_js_syntax(source: str) -> bool:
+def _extract_all_js_blocks() -> list[dict]:
+    files = _js_source_files()
+    format_targets = _find_format_targets(files)
+    blocks = []
+    for p in files:
+        blocks.extend(_extract_js_blocks_from_file(p, format_targets))
+    return blocks
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 1. JS Syntax Check
+# ─────────────────────────────────────────────────────────────────────────────
+
+def check_js_syntax(blocks: list[dict]) -> bool:
     _head("[1] JS Syntax Check")
 
     try:
@@ -64,149 +252,144 @@ def check_js_syntax(source: str) -> bool:
         _warn("esprima not installed — run: pip install esprima")
         return True
 
-    blocks = _extract_js_blocks(source)
     if not blocks:
         _warn("No JS blocks found in source")
         return True
 
-    _info(f"Checking {len(blocks)} JS block(s) via esprima")
+    by_kind = {}
+    for b in blocks:
+        by_kind[b['kind']] = by_kind.get(b['kind'], 0) + 1
+    kind_summary = ", ".join(f"{k}: {v}" for k, v in sorted(by_kind.items()))
+    files = {b['file'] for b in blocks}
+    _info(f"Checking {len(blocks)} JS block(s) across {len(files)} file(s) ({kind_summary})")
 
-    all_ok = True
-    for label, code in blocks:
+    failures = []
+    for b in blocks:
         try:
-            esprima.parseScript(code, tolerant=False)
-            lines = code.count('\n')
-            _ok(f"{label} ({lines} lines)")
+            esprima.parseScript(b['code'], tolerant=False)
         except Exception as e:
-            all_ok = False
-            # Find the line in context
-            line_no = getattr(e, 'lineNumber', None)
-            desc    = getattr(e, 'description', str(e))
-            _fail(f"{label} — line {line_no}: {desc}")
-            if line_no:
-                code_lines = code.splitlines()
-                start = max(0, line_no - 3)
-                end   = min(len(code_lines), line_no + 2)
-                for i, ln in enumerate(code_lines[start:end], start=start + 1):
-                    marker = ">>>" if i == line_no else "   "
-                    color  = "\033[31m" if i == line_no else "\033[90m"
-                    print(f"       {color}{marker} {i:4d} | {ln}\033[0m")
+            failures.append((b, e))
 
-    return all_ok
+    if not failures:
+        _ok(f"All {len(blocks)} blocks parsed cleanly")
+        return True
+
+    for b, e in failures:
+        line_no = getattr(e, 'lineNumber', None)
+        desc = getattr(e, 'description', str(e))
+        file_line = (b['start_line'] + line_no - 1) if line_no else None
+        loc = f"{_rel(b['file'])}:{file_line}" if file_line else _rel(b['file'])
+        _fail(f"{loc} — {b['label']} ({b['kind']}): {desc}")
+        if line_no:
+            code_lines = b['code'].splitlines()
+            start = max(0, line_no - 3)
+            end = min(len(code_lines), line_no + 2)
+            for i, ln in enumerate(code_lines[start:end], start=start + 1):
+                marker = ">>>" if i == line_no else "   "
+                color = "\033[31m" if i == line_no else "\033[90m"
+                abs_line = b['start_line'] + i - 1
+                print(f"       {color}{marker} {abs_line:5d} | {ln}\033[0m")
+
+    return False
 
 
 # ─────────────────────────────────────────────────────────────────────────────
 # 2. JS Function Inventory
 # ─────────────────────────────────────────────────────────────────────────────
 
-def check_js_functions(source: str) -> bool:
+_FN_DEF_RE = re.compile(r'\bfunction\s+(\w+)\s*\(')
+_ARROW_RE = re.compile(r'\b(?:const|let|var)\s+(\w+)\s*=\s*(?:async\s*)?\(')
+_HTML_CALL_RE = re.compile(r'\bon\w+=["\']([a-zA-Z_]\w*)\s*\(')
+
+
+def check_js_functions(blocks: list[dict]) -> bool:
     _head("[2] JS Function Inventory")
 
-    # For function names we don't need escape processing — scan all JS blocks
-    # including inline f-string blocks (raw content is fine for name extraction)
-    all_js_source = '\n'.join([
-        m.group(1)
-        for m in re.finditer(r'\b_\w+_JS\s*=\s*"""(.*?)"""', source, re.DOTALL)
-    ] + [
-        m.group(1)
-        for m in re.finditer(r'\bjs\s*=\s*f?"""(.*?)"""', source, re.DOTALL)
-    ])
-
-    blocks = _extract_js_blocks(source)
     defined = set()
-    for _, code in blocks:
-        for m in re.finditer(r'\bfunction\s+(\w+)\s*\(', code):
-            defined.add(m.group(1))
-        # Arrow functions assigned to const/let/var: const foo = (...) =>
-        for m in re.finditer(r'\b(?:const|let|var)\s+(\w+)\s*=\s*(?:async\s*)?\(', code):
-            defined.add(m.group(1))
-
-    # Also scan raw inline blocks just for names
-    for m in re.finditer(r'\bfunction\s+(\w+)\s*\(', all_js_source):
-        defined.add(m.group(1))
-    for m in re.finditer(r'\b(?:const|let|var)\s+(\w+)\s*=\s*(?:async\s*)?\(', all_js_source):
-        defined.add(m.group(1))
-
-    # Extract function names called directly from HTML event attributes
-    # e.g. onclick="openGFRChooser()" → openGFRChooser
-    # Match the leading function name only (before the first '(')
     referenced = set()
-    for m in re.finditer(r'\bon\w+=["\']([a-zA-Z_]\w*)\s*\(', source):
-        referenced.add(m.group(1))
+
+    # Definitions: scan both flattened JS code *and* raw source (to catch
+    # functions defined inside single-quoted string concatenations — e.g.
+    # 'function openDrawer(){...}' in shells.py's _topnav).
+    for b in blocks:
+        defined.update(_FN_DEF_RE.findall(b['code']))
+        defined.update(_ARROW_RE.findall(b['code']))
+
+    for p in _js_source_files():
+        try:
+            src = p.read_text(encoding='utf-8')
+        except Exception:
+            continue
+        defined.update(_FN_DEF_RE.findall(src))
+        defined.update(_ARROW_RE.findall(src))
+        referenced.update(_HTML_CALL_RE.findall(src))
 
     _info(f"{len(defined)} functions defined, {len(referenced)} referenced in HTML event attrs")
 
-    # Filter browser built-ins, DOM APIs, and keywords that regex can false-positive on
     builtins = {
         'alert', 'confirm', 'fetch', 'JSON', 'parseInt', 'parseFloat',
         'setTimeout', 'clearTimeout', 'setInterval', 'clearInterval',
         'console', 'document', 'window', 'event', 'Promise', 'FormData',
         'Object', 'Array', 'if', 'return', 'this', 'getElementById',
         'querySelector', 'classList', 'addEventListener',
-        # Defined as concatenated string literals inside _page() — not in triple-quoted blocks
-        'toggleNav', 'toggleTheme',
     }
     missing = referenced - defined - builtins
 
     if missing:
         for fn in sorted(missing):
             _warn(f"Referenced but not found in JS: {fn}()")
-        # Don't fail — these could be browser APIs or loaded elsewhere
-        return True
-    else:
-        _ok("All HTML-referenced functions found in JS blocks")
-        return True
+        return True  # warn-only; could be browser APIs or scripts injected elsewhere
+    _ok("All HTML-referenced functions found in JS blocks")
+    return True
 
 
 # ─────────────────────────────────────────────────────────────────────────────
 # 3. f-string JS Escape Check
 # ─────────────────────────────────────────────────────────────────────────────
 
-def check_fstring_escapes(source: str) -> bool:
-    """
-    Scans f-string JS blocks (js = f\"\"\"...\"\"\") for bare \\' sequences.
+def check_fstring_escapes() -> bool:
+    """Bare `\\'` inside an f-string JS block gets collapsed to `'` by Python,
+    breaking any JS string literal that expected an escaped quote.
 
-    In a Python triple-quoted f-string, \\' is processed as an escape sequence
-    for a single quote — stripping the backslash.  The JS output sees just ' ,
-    which breaks JS string literals that used \\' to embed a quote.
-
-    Correct form: use \\\\' in the Python source so Python produces \\' in the
-    JS output (i.e. \\\\' → \\ + ' → \\').
-
-    Real incident: onclick="sbTab(this,\\'info-' written as \\' produced
-    onclick="sbTab(this,'info-' which is a JS syntax error.
+    Correct form: `\\\\'` in the Python source → `\\'` in the JS output.
     """
     _head("[3] f-string JS Escape Check")
 
-    # Match f-string blocks assigned to `js`
-    fblocks = []
-    for m in re.finditer(r'js\s*=\s*f"""(.*?)"""', source, re.DOTALL):
-        start_line = source[:m.start()].count('\n') + 1
-        fblocks.append((start_line, m.group(1)))
+    issues = []
+    total_blocks = 0
 
-    if not fblocks:
+    for p in _js_source_files():
+        try:
+            source = p.read_text(encoding='utf-8')
+        except Exception:
+            continue
+        for m in _TRIPLE_RE.finditer(source):
+            name = m.group(1)
+            prefix = m.group(2).lower()
+            if not _is_js_block(name, m.group(3)) or 'f' not in prefix:
+                continue
+            total_blocks += 1
+            body = m.group(3)
+            block_start = source[:m.start(3)].count('\n') + 1
+            for i, line in enumerate(body.splitlines(), start=0):
+                abs_line = block_start + i
+                # Bare \' (bad) but not \\' (ok — produces \' in JS output)
+                if re.search(r"(?<!\\)\\(?!\\)'", line):
+                    issues.append((p, abs_line, line.strip()))
+
+    if not total_blocks:
         _info("No f-string JS blocks found — skipping")
         return True
 
-    _info(f"Scanning {len(fblocks)} f-string JS block(s) for bare \\\\' sequences")
-
-    issues = []
-    for block_start, block_content in fblocks:
-        for i, line in enumerate(block_content.splitlines(), start=1):
-            abs_line = block_start + i
-            # Match a \  NOT preceded by another \  and NOT followed by another \
-            # i.e. bare \' (bad) but not \\' (ok — that produces \' in JS output)
-            if re.search(r"(?<!\\)\\(?!\\)'", line):
-                issues.append((abs_line, line.strip()))
+    _info(f"Scanned {total_blocks} f-string JS block(s)")
 
     if issues:
-        for line_no, line_text in issues:
-            _warn(f"Line {line_no}: bare \\' in f-string JS — Python collapses this to ' (use \\\\\\\\' to emit \\' in JS)")
+        for path, line_no, line_text in issues:
+            _warn(f"{_rel(path)}:{line_no} — bare \\' in f-string JS (use \\\\\\\\' to emit \\' in JS)")
             print(f"         \033[90m{line_text[:100]}\033[0m")
         return False
-    else:
-        _ok("No bare \\' found in f-string JS blocks")
-        return True
+    _ok("No bare \\' found in f-string JS blocks")
+    return True
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -218,7 +401,6 @@ def check_env() -> bool:
 
     env_file = ROOT / ".env"
     if env_file.exists():
-        # Load without dotenv dependency
         for line in env_file.read_text(encoding='utf-8').splitlines():
             line = line.strip()
             if line and not line.startswith('#') and '=' in line:
@@ -236,7 +418,7 @@ def check_env() -> bool:
         ],
         "Shotstack Worker": [
             "SHOTSTACK_SANDBOX_API_KEY",
-            "BUNNY_STORAGE_API_KEY",   # shared
+            "BUNNY_STORAGE_API_KEY",
             "N8N_WEBHOOK_URL",
             "N8N_WEBHOOK_TOKEN",
         ],
@@ -245,8 +427,9 @@ def check_env() -> bool:
     OPTIONAL = [
         "SHOTSTACK_PRODUCTION_API_KEY",
         "GOOGLE_MAPS_API_KEY",
-        "GOOGLE_CLIENT_ID",
-        "GOOGLE_CLIENT_SECRET",
+        "HUB_CLIENT_ID",
+        "HUB_CLIENT_SECRET",
+        "HUB_ALLOWED_DOMAIN",
         "SLACK_WEBHOOK_URL",
         "BUNNY_STORAGE_REGION",
     ]
@@ -289,11 +472,10 @@ async def check_live() -> bool:
 
     all_ok = True
     HUB = "https://reformtechops--outreach-hub-web.modal.run"
-    br  = os.environ.get("BASEROW_URL", "")
-    bt  = os.environ.get("BASEROW_API_TOKEN", "")
+    br = os.environ.get("BASEROW_URL", "")
+    bt = os.environ.get("BASEROW_API_TOKEN", "")
 
     async with httpx.AsyncClient(timeout=15, follow_redirects=True) as client:
-
         # Hub ping
         try:
             r = await client.get(f"{HUB}/login")
@@ -308,10 +490,21 @@ async def check_live() -> bool:
 
         # Baserow auth + key tables
         if br and bt:
-            # Key tables
             KEY_TABLES = [
+                ("T_ATT_VENUES", 768),
+                ("T_ATT_ACTS",   784),
                 ("T_GOR_VENUES", 790),
                 ("T_GOR_ACTS",   791),
+                ("T_COM_VENUES", 797),
+                ("T_COM_ACTS",   798),
+                ("T_GOR_BOXES",  800),
+                ("T_GOR_ROUTES", 801),
+                ("T_GOR_STOPS",  802),
+                ("T_PI_ACTIVE",  775),
+                ("T_PI_BILLED",  773),
+                ("T_PI_AWAITING", 776),
+                ("T_PI_CLOSED",  772),
+                ("T_PI_FINANCE", 781),
             ]
             first = True
             for name, tid in KEY_TABLES:
@@ -356,18 +549,14 @@ async def main():
     run_env  = not args or '--env'  in args or '--all' in args
     run_live = not args or '--live' in args or '--all' in args
 
-    hub_file = ROOT / "execution" / "modal_outreach_hub.py"
-    source = hub_file.read_text(encoding='utf-8') if hub_file.exists() else ""
-
     results: dict[str, bool] = {}
     t0 = time.time()
 
-    if run_js and source:
-        results["js_syntax"]        = check_js_syntax(source)
-        results["js_functions"]     = check_js_functions(source)
-        results["fstring_escapes"]  = check_fstring_escapes(source)
-    elif run_js:
-        _fail("modal_outreach_hub.py not found")
+    if run_js:
+        blocks = _extract_all_js_blocks()
+        results["js_syntax"]       = check_js_syntax(blocks)
+        results["js_functions"]    = check_js_functions(blocks)
+        results["fstring_escapes"] = check_fstring_escapes()
 
     if run_env:
         results["env"] = check_env()

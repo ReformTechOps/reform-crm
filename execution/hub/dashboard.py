@@ -42,12 +42,30 @@ def _login_page(error: str = "") -> str:
 # ──────────────────────────────────────────────────────────────────────────────
 _HUB_BODY = """
 <style>
-.content{padding:32px 40px !important}
+@media(min-width:769px){.content{padding:32px 40px}}
 .db-topbar{display:flex;gap:24px;align-items:baseline;margin-bottom:24px;padding-bottom:14px;border-bottom:1px solid var(--border)}
 .db-kpi{display:flex;flex-direction:column}
 .db-kpi-val{font-size:15px;font-weight:700;line-height:1}
-.db-kpi-lbl{font-size:10px;color:var(--text3);margin-top:3px;white-space:nowrap}
+.db-kpi-lbl{font-size:10px;color:var(--text3);margin-top:3px}
 .db-main{display:grid;grid-template-columns:1fr 380px;gap:28px}
+.db-sidebar{display:grid;grid-template-rows:1fr 1fr;gap:16px}
+.db-tool-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin-bottom:32px}
+.db-pi-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:14px}
+.db-ql-row{display:flex;gap:10px;flex-wrap:wrap}
+@media(max-width:900px){.db-main{grid-template-columns:1fr}.db-sidebar{grid-template-rows:auto auto}}
+@media(max-width:768px){
+  .db-topbar{gap:10px;flex-wrap:wrap}
+  .db-kpi{flex:1 1 calc(50% - 5px);min-width:0}
+  .db-tool-grid{grid-template-columns:1fr;margin-bottom:20px}
+  .db-pi-grid{grid-template-columns:repeat(2,1fr)}
+  .db-card{padding:14px 16px}
+  .db-card-row{gap:14px}
+  .db-ql-row > a{flex:1 1 100%;min-width:0}
+}
+@media(max-width:500px){
+  .db-kpi{flex-basis:100%}
+  .db-pi-grid{grid-template-columns:1fr}
+}
 .db-card{background:var(--card);border:1px solid var(--border);border-radius:10px;padding:20px 22px}
 .db-card-hd{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;gap:12px}
 .db-card-title{font-size:13px;font-weight:700;color:var(--text)}
@@ -62,8 +80,8 @@ _HUB_BODY = """
 .db-link{text-decoration:none;display:flex;align-items:center;gap:8px;padding:10px 14px;transition:border-color .12s;flex:1;min-width:0}
 .db-link:hover{border-color:var(--text3) !important}
 .db-link-icon{font-size:18px;flex-shrink:0}
-.db-link-txt{font-size:12px;font-weight:600;color:var(--text);white-space:nowrap}
-.db-link-sub{font-size:9px;color:var(--text3);white-space:nowrap}
+.db-link-txt{font-size:12px;font-weight:600;color:var(--text)}
+.db-link-sub{font-size:9px;color:var(--text3)}
 </style>
 
 <!-- Main 2-column layout -->
@@ -81,7 +99,7 @@ _HUB_BODY = """
 
     <!-- Outreach tool cards -->
     <div class="db-sect">Outreach</div>
-    <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin-bottom:32px" id="tool-cards">
+    <div class="db-tool-grid" id="tool-cards">
       <div class="db-card"><div class="loading">Loading\u2026</div></div>
       <div class="db-card"><div class="loading">Loading\u2026</div></div>
       <div class="db-card"><div class="loading">Loading\u2026</div></div>
@@ -89,7 +107,7 @@ _HUB_BODY = """
 
     <!-- PI Cases -->
     <div class="db-sect">PI Cases</div>
-    <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:14px">
+    <div class="db-pi-grid">
       <div class="db-card">
         <div class="db-card-hd"><span class="db-card-title">Active</span><span class="db-card-pill" style="background:#7c3aed22;color:#7c3aed">Treatment</span></div>
         <div class="db-card-val" id="pi-active" style="color:#7c3aed">--</div>
@@ -110,7 +128,7 @@ _HUB_BODY = """
   </div>
 
   <!-- RIGHT COLUMN (sidebar) -->
-  <div style="display:grid;grid-template-rows:1fr 1fr;gap:16px">
+  <div class="db-sidebar">
     <!-- Priority Alerts -->
     <div class="panel" style="margin:0;display:flex;flex-direction:column;overflow:hidden">
       <div class="panel-hd">
@@ -135,7 +153,7 @@ _HUB_BODY = """
 <!-- Quick Links — horizontal row -->
 <div style="margin-top:24px">
   <div class="db-sect">Quick Links</div>
-  <div style="display:flex;gap:10px">
+  <div class="db-ql-row">
     <a href="/outreach/planner" class="db-card db-link">
       <div class="db-link-icon">\U0001f5fa\ufe0f</div>
       <div><div class="db-link-txt">Route Planner</div><div class="db-link-sub">Plan outreach routes</div></div>
@@ -162,11 +180,154 @@ _HUB_BODY = """
 <!-- Calendar — full width bottom -->
 <div style="margin-top:24px">
   <div class="db-sect">Calendar</div>
-  <div class="db-card" style="padding:0;overflow:hidden;height:440px" id="db-cal-wrap">
+  <div class="db-card" style="padding:0;overflow:hidden;height:clamp(260px,55vh,440px)" id="db-cal-wrap">
     <div class="loading" style="padding:20px">Loading calendar\u2026</div>
   </div>
 </div>
 """
+
+# Shared calendar widget JS — used by both the dashboard (`_hub_page`) and the
+# full `/calendar` page (`_calendar_page`). Expects a `<div id="db-cal-wrap">`
+# somewhere in the body. Globals `esc` and `fetch` are the only dependencies.
+_CAL_WIDGET_JS = """
+// Calendar widget: mini month grid + upcoming events list
+async function loadCalendarWidget() {
+  var wrap = document.getElementById('db-cal-wrap');
+  renderCalendarShell(wrap);
+  try {
+    var r = await fetch('/api/calendar/events');
+    if (r.status === 401) {
+      setCalendarError(wrap, 'Calendar access expired', 'Sign out to refresh \u2192');
+      return;
+    }
+    if (!r.ok) {
+      setCalendarError(wrap, "Couldn't load calendar", 'Sign out to re-authenticate \u2192');
+      return;
+    }
+    var data = await r.json();
+    populateCalendarEvents(wrap, data.items || []);
+  } catch(e) {
+    setCalendarError(wrap, 'Calendar unavailable', '');
+  }
+}
+
+function renderCalendarShell(wrap) {
+  var now = new Date();
+  var year = now.getFullYear();
+  var month = now.getMonth();
+  var monthName = now.toLocaleDateString('en-US', {month:'long', year:'numeric'});
+  var firstOfMonth = new Date(year, month, 1);
+  var leadingBlanks = firstOfMonth.getDay();
+  var daysInMonth   = new Date(year, month + 1, 0).getDate();
+  var daysPrevMonth = new Date(year, month, 0).getDate();
+  var todayKey = now.toISOString().substring(0, 10);
+
+  var cells = '';
+  for (var i = leadingBlanks - 1; i >= 0; i--) {
+    var d = daysPrevMonth - i;
+    cells += '<div class="cal-day-cell other-month">' + d + '</div>';
+  }
+  for (var d = 1; d <= daysInMonth; d++) {
+    var dateKey = year + '-' + String(month + 1).padStart(2, '0') + '-' + String(d).padStart(2, '0');
+    var cls = 'cal-day-cell';
+    if (dateKey === todayKey) cls += ' today';
+    cells += '<div class="' + cls + '" data-date="' + dateKey + '">' + d + '</div>';
+  }
+  var totalCells = leadingBlanks + daysInMonth;
+  var trailingBlanks = (7 - (totalCells % 7)) % 7;
+  for (var d = 1; d <= trailingBlanks; d++) {
+    cells += '<div class="cal-day-cell other-month">' + d + '</div>';
+  }
+
+  wrap.innerHTML = ''
+    + '<div class="cal-wrap">'
+    +   '<div class="cal-month">'
+    +     '<div class="cal-month-hdr">'
+    +       '<div class="cal-month-title">' + esc(monthName) + '</div>'
+    +       '<a href="/calendar" class="cal-month-sub" style="text-decoration:none">Open \u2192</a>'
+    +     '</div>'
+    +     '<div class="cal-weekdays"><div>S</div><div>M</div><div>T</div><div>W</div><div>T</div><div>F</div><div>S</div></div>'
+    +     '<div class="cal-days" id="cal-days">' + cells + '</div>'
+    +   '</div>'
+    +   '<div class="cal-upcoming" id="cal-upcoming">'
+    +     '<div class="cal-empty-msg">Loading events\u2026</div>'
+    +   '</div>'
+    + '</div>';
+}
+
+function populateCalendarEvents(wrap, items) {
+  var eventDays = new Set();
+  items.forEach(function(ev) {
+    var d;
+    if (ev.allDay) d = (ev.start || '').substring(0, 10);
+    else if (ev.start) d = new Date(ev.start).toISOString().substring(0, 10);
+    else return;
+    eventDays.add(d);
+  });
+  eventDays.forEach(function(dateKey) {
+    var cell = wrap.querySelector('.cal-day-cell[data-date="' + dateKey + '"]');
+    if (cell) cell.classList.add('has-events');
+  });
+
+  var upcoming = document.getElementById('cal-upcoming');
+  if (!items.length) {
+    upcoming.innerHTML = '<div class="cal-empty-msg">No upcoming events</div>';
+    return;
+  }
+  var groups = {};
+  var order  = [];
+  items.slice(0, 10).forEach(function(ev) {
+    var d;
+    if (ev.allDay) d = (ev.start || '').substring(0, 10);
+    else           d = new Date(ev.start).toISOString().substring(0, 10);
+    if (!groups[d]) { groups[d] = []; order.push(d); }
+    groups[d].push(ev);
+  });
+  var today = new Date();
+  var todayKey = today.toISOString().substring(0, 10);
+  var tomorrow = new Date(today.getTime() + 86400000).toISOString().substring(0, 10);
+
+  var html = '<div class="cal-upcoming-hdr">Upcoming</div>';
+  order.forEach(function(d) {
+    var dateObj = new Date(d + 'T00:00:00');
+    var label;
+    if (d === todayKey)      label = 'Today';
+    else if (d === tomorrow) label = 'Tomorrow';
+    else label = dateObj.toLocaleDateString('en-US', {weekday:'short', month:'short', day:'numeric'});
+    html += '<div class="cal-day"><div class="cal-day-hdr">' + esc(label) + '</div>';
+    groups[d].forEach(function(ev) {
+      var timeStr;
+      if (ev.allDay) timeStr = 'all day';
+      else {
+        var t = new Date(ev.start);
+        timeStr = t.toLocaleTimeString('en-US', {hour:'numeric', minute:'2-digit'});
+      }
+      html += '<div class="cal-evt">';
+      html += '<div class="cal-evt-time">' + esc(timeStr) + '</div>';
+      html += '<div class="cal-evt-title">';
+      if (ev.link) html += '<a href="' + esc(ev.link) + '" target="_blank" style="color:inherit">' + esc(ev.summary) + '</a>';
+      else         html += esc(ev.summary);
+      if (ev.location) html += '<div class="cal-evt-loc">' + esc(ev.location) + '</div>';
+      html += '</div></div>';
+    });
+    html += '</div>';
+  });
+  upcoming.innerHTML = html;
+}
+
+function setCalendarError(wrap, title, linkText) {
+  var upcoming = document.getElementById('cal-upcoming');
+  var linkHtml = linkText ? '<a href="/logout">' + esc(linkText) + '</a>' : '';
+  if (upcoming) {
+    upcoming.innerHTML = '<div class="cal-empty-msg">' + esc(title) + '<br>' + linkHtml + '</div>';
+  } else {
+    wrap.innerHTML = '<div class="cal-err"><div>' + esc(title) + '</div>' + linkHtml + '</div>';
+  }
+}
+
+loadCalendarWidget();
+"""
+
 
 def _hub_page(br: str, bt: str, user: dict = None) -> str:
     header = (
@@ -178,7 +339,6 @@ def _hub_page(br: str, bt: str, user: dict = None) -> str:
         '<div class="header-right"></div>'
         '</div>'
     )
-    cal_url = os.environ.get("GOOGLE_CALENDAR_EMBED_URL", "")
     js = f"""
 const TOOLS = [
   {{key: 'att', label: 'PI Attorney',  color: '#7c3aed', activeStatus: 'Active Relationship', badge: 'b-pi',  short: 'PI', href: '/attorney'}},
@@ -284,20 +444,7 @@ async function load() {{
 
 load();
 
-// Mini calendar
-(function() {{
-  var calUrl = '{cal_url}';
-  var wrap = document.getElementById('db-cal-wrap');
-  if (calUrl) {{
-    wrap.innerHTML = '<iframe src="' + calUrl + '&mode=WEEK&showTabs=0&showTitle=0&showNav=0&showPrint=0&showCalendars=0&dates=20260101/20261231" '
-      + 'style="width:100%;height:100%;border:none" frameborder="0" scrolling="no"></iframe>';
-  }} else {{
-    wrap.innerHTML = '<div style="display:flex;flex-direction:column;align-items:center;justify-content:center;height:100%;color:var(--text3);font-size:12px">'
-      + '<div style="font-size:28px;margin-bottom:8px">\U0001f4c5</div>'
-      + '<div>Calendar not configured</div>'
-      + '<a href="/calendar" style="color:#ea580c;font-size:11px;margin-top:4px">Set up calendar \u2192</a></div>';
-  }}
-}})();
+{_CAL_WIDGET_JS}
 """
     return _page('hub', 'Dashboard', header, _HUB_BODY, js, br, bt, user=user)
 
@@ -306,34 +453,20 @@ load();
 # CALENDAR PAGE
 # ──────────────────────────────────────────────────────────────────────────────
 def _calendar_page(br: str, bt: str, user: dict = None) -> str:
-    embed_url = os.environ.get("GOOGLE_CALENDAR_EMBED_URL", "")
     header = (
         '<div class="header"><div class="header-left">'
         '<h1>\U0001f4c5 Calendar</h1>'
         '<div class="sub">Follow-up and scheduling calendar</div>'
         '</div></div>'
     )
-    if embed_url:
-        body = (
-            '<div style="padding:16px 18px;height:calc(100vh - 120px)">'
-            f'<iframe src="{embed_url}" style="width:100%;height:100%;border:none;border-radius:10px" '
-            'frameborder="0" scrolling="no"></iframe>'
-            '</div>'
-        )
-    else:
-        body = (
-            '<div style="display:flex;flex-direction:column;align-items:center;justify-content:center;'
-            'padding:80px 20px;text-align:center">'
-            '<div style="font-size:48px;margin-bottom:16px">\U0001f4c5</div>'
-            '<div style="font-size:16px;font-weight:700;margin-bottom:8px">Calendar Not Configured</div>'
-            '<div style="font-size:13px;color:var(--text3);max-width:440px;line-height:1.6">'
-            'Add <code style="background:var(--card);padding:2px 6px;border-radius:4px;font-size:12px">GOOGLE_CALENDAR_EMBED_URL</code> '
-            'to the <code style="background:var(--card);padding:2px 6px;border-radius:4px;font-size:12px">outreach-hub-secrets</code> Modal secret.<br><br>'
-            'Get the embed URL from Google Calendar: open the calendar, click \u22ef \u2192 Settings \u2192 '
-            'scroll to &ldquo;Integrate calendar&rdquo; \u2192 copy the <strong>Public URL to this calendar</strong> or <strong>Embed code</strong> src.</div>'
-            '</div>'
-        )
-    return _page('calendar', 'Calendar', header, body, '', br, bt, user=user)
+    body = (
+        '<div class="cal-full">'
+        '<div class="db-card" id="db-cal-wrap">'
+        '<div class="loading" style="padding:20px">Loading calendar\u2026</div>'
+        '</div>'
+        '</div>'
+    )
+    return _page('calendar', 'Calendar', header, body, _CAL_WIDGET_JS, br, bt, user=user)
 
 
 # ──────────────────────────────────────────────────────────────────────────────

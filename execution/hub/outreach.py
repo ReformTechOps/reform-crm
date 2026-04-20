@@ -11,6 +11,7 @@ from .guerilla import (
     _GFR_CSS, _GFR_HTML, _GFR_FORMS345_HTML, _GFR_FORM2_HTML,
     _GFR_JS, _GFR_FORMS345_JS,
 )
+from .contact_detail import contact_actions_js, contact_detail_html, contact_detail_js
 import os
 
 
@@ -36,6 +37,8 @@ def _directory_page(tool_key: str, br: str, bt: str, user: dict = None) -> str:
     active_key = tool_key + '_dir'
     import json as _json
     stages_json = _json.dumps(c['stages'])
+    _contact_actions = contact_actions_js()
+    _contact_detail  = contact_detail_js()
 
     header = (
         f'<div class="header" style="background:linear-gradient(135deg,{c["color"]}22,transparent)">'
@@ -53,22 +56,10 @@ def _directory_page(tool_key: str, br: str, bt: str, user: dict = None) -> str:
         '<div class="venue-grid" id="venue-grid"><div class="loading">Loading\u2026</div></div>'
         '</div>'
     )
-    body += (
-        f'<div class="cd-overlay" id="cd-overlay" onclick="if(event.target===this)closeContactDetail()">'
-        f'<div class="cd-modal">'
-        f'<div class="cd-header">'
-        f'<div style="flex:1;min-width:0"><div class="cd-title" id="cd-title"></div>'
-        f'<div id="cd-subtitle" style="margin-top:4px"></div></div>'
-        f'<div class="cd-header-actions">'
-        f'<button class="cd-btn-email" onclick="showEmailTemplates(_cdVenue,\'{tool_key}\')" title="Email templates">\u2709 Email</button>'
-        f'<button class="cd-btn-close" onclick="closeContactDetail()">&times;</button>'
-        f'</div></div>'
-        f'<div class="cd-body">'
-        f'<div class="cd-panel active" id="cd-panel-detail"><div id="cd-detail-body"></div></div>'
-        f'<div class="cd-panel" id="cd-panel-tpl"><div id="cd-tpl-body"></div></div>'
-        f'</div></div></div>'
-    )
+    body += contact_detail_html(tool_key)
     js = f"""
+{_contact_actions}
+const _TOOL_KEY    = '{tool_key}';
 const _stages      = {stages_json};
 const _activeStatus = '{c["activeStatus"]}';
 const _nameField   = '{c["nameField"]}';
@@ -81,231 +72,14 @@ const ACTS_LINK    = '{c["actLinkField"]}';
 let _venues = [];
 let _stageFilter = '';
 let _sortMode = 'distance';
-let _cdVenue = null;
 
-async function bpatch(tid, id, data) {{
-  return fetch(BR+'/api/database/rows/table/'+tid+'/'+id+'/?user_field_names=true',{{
-    method:'PATCH',headers:{{'Authorization':'Token '+BT,'Content-Type':'application/json'}},
-    body:JSON.stringify(data)}});
-}}
-async function bpost(tid, data) {{
-  return fetch(BR+'/api/database/rows/table/'+tid+'/?user_field_names=true',{{
-    method:'POST',headers:{{'Authorization':'Token '+BT,'Content-Type':'application/json'}},
-    body:JSON.stringify(data)}});
-}}
+{_contact_detail}
 
-function stageOpts(cur) {{
-  return _stages.map(s => '<option value="'+s+'"'+(cur===s?' selected':'')+'>'+s+'</option>').join('');
-}}
-
-function renderNotes(text) {{
-  if (!text || !text.trim()) return '<div style="color:var(--text3);font-size:12px;padding:4px 0">No notes yet</div>';
-  return text.split('\\n---\\n').filter(e => e.trim()).map(entry => {{
-    const m = entry.match(/^\\[(\d{{4}}-\d{{2}}-\d{{2}})\\] ([\s\S]*)$/);
-    if (m) return '<div style="padding:5px 0;border-bottom:1px solid var(--border)">'
-      + '<div style="font-size:10px;color:var(--text3);margin-bottom:2px">' + m[1] + '</div>'
-      + '<div style="font-size:12px">' + esc(m[2].trim()) + '</div></div>';
-    return '<div style="padding:5px 0;border-bottom:1px solid var(--border);font-size:12px">' + esc(entry.trim()) + '</div>';
-  }}).join('');
-}}
-
-function renderAct(a) {{
-  const type = a['Type'] ? (typeof a['Type'] === 'object' ? a['Type'].value : a['Type']) : '';
-  const outcome = a['Outcome'] ? (typeof a['Outcome'] === 'object' ? a['Outcome'].value : a['Outcome']) : '';
-  const date = a['Date'] || '';
-  const person = a['Contact Person'] || '';
-  const summary = a['Summary'] || '';
-  const fu = a['Follow-Up Date'] || '';
-  return '<div style="padding:8px 0;border-bottom:1px solid var(--border)">'
-    + '<div style="display:flex;justify-content:space-between;margin-bottom:3px">'
-    + '<span style="font-size:11px;font-weight:600;background:var(--badge-bg);padding:1px 6px;border-radius:4px">' + esc(type) + '</span>'
-    + '<span style="font-size:11px;color:var(--text3)">' + esc(date) + '</span></div>'
-    + (outcome ? '<div style="font-size:12px;color:var(--text2)">' + esc(outcome) + '</div>' : '')
-    + (person  ? '<div style="font-size:11px;color:var(--text3)">with ' + esc(person) + '</div>' : '')
-    + (summary ? '<div style="font-size:12px;margin-top:3px">' + esc(summary) + '</div>' : '')
-    + (fu      ? '<div style="font-size:11px;color:#f59e0b;margin-top:2px">Follow-up: ' + esc(fu) + '</div>' : '')
-    + '</div>';
-}}
-
-function _buildDetailHTML(v) {{
-  const id  = v.id;
-  const status = sv(v['Contact Status']);
-  const phone   = esc(v[_phoneField] || '');
-  const addr    = esc(v[_addrField]  || '');
-  const website = v['Website'] || '';
-  const fu      = v['Follow-Up Date'] || '';
-  const notesRaw = v['Notes'] || '';
-  let html = '';
-  if (phone)   html += '<div style="font-size:13px;margin-bottom:6px">\u260e <a href="tel:'+phone+'" style="color:var(--text)">'+phone+'</a></div>';
-  if (addr)    html += '<div style="font-size:12px;color:var(--text2);margin-bottom:6px">\U0001f4cd '+addr+'</div>';
-  if (website) html += '<div style="font-size:12px;margin-bottom:10px">\U0001f310 <a href="'+esc(website)+'" target="_blank" style="color:#3b82f6">'+esc(website)+'</a></div>';
-  html += '<hr style="border:none;border-top:1px solid var(--border);margin:10px 0">';
-  html += '<div style="margin-bottom:8px">';
-  html += '<div style="font-size:11px;font-weight:600;color:var(--text3);text-transform:uppercase;margin-bottom:4px">Contact Status</div>';
-  html += '<div style="display:flex;gap:6px;align-items:center">';
-  html += '<select id="cd-status-'+id+'" style="flex:1;background:var(--input-bg);border:1px solid var(--border);color:var(--text);border-radius:6px;padding:5px 8px;font-size:12px" onchange="updateStatus('+id+',this.value)">'+stageOpts(status)+'</select>';
-  html += '<span id="cd-status-st-'+id+'" style="font-size:11px;color:#34a853;min-width:20px"></span></div></div>';
-  html += '<div style="margin-bottom:10px">';
-  html += '<div style="font-size:11px;font-weight:600;color:var(--text3);text-transform:uppercase;margin-bottom:4px">Follow-Up Date</div>';
-  html += '<div style="display:flex;gap:6px;align-items:center">';
-  html += '<input type="date" id="cd-fu-'+id+'" value="'+esc(fu)+'" style="flex:1;background:var(--input-bg);border:1px solid var(--border);color:var(--text);border-radius:6px;padding:5px 8px;font-size:12px">';
-  html += '<button onclick="saveFollowUp('+id+')" style="background:#3b82f6;color:#fff;border:none;border-radius:6px;padding:5px 10px;cursor:pointer;font-size:11px;font-weight:600">Save</button>';
-  html += '<span id="cd-fu-st-'+id+'" style="font-size:11px;color:#34a853;min-width:20px"></span></div></div>';
-  html += '<hr style="border:none;border-top:1px solid var(--border);margin:10px 0">';
-  html += '<div style="margin-bottom:10px">';
-  html += '<div style="font-size:11px;font-weight:600;color:var(--text3);text-transform:uppercase;margin-bottom:6px">Notes</div>';
-  html += '<div id="cd-notes-'+id+'" style="max-height:120px;overflow-y:auto;background:var(--card);border-radius:6px;padding:6px 8px;border:1px solid var(--border)">'+renderNotes(notesRaw)+'</div>';
-  html += '<div style="display:flex;gap:6px;margin-top:6px">';
-  html += '<input type="text" id="cd-note-in-'+id+'" placeholder="Add a note\u2026" style="flex:1;background:var(--input-bg);border:1px solid var(--border);color:var(--text);border-radius:6px;padding:5px 8px;font-size:12px">';
-  html += '<button onclick="addNote('+id+')" style="background:#e94560;color:#fff;border:none;border-radius:6px;padding:5px 10px;cursor:pointer;font-size:11px;font-weight:600">Add</button>';
-  html += '</div><div id="cd-note-st-'+id+'" style="font-size:11px;color:#34a853;margin-top:3px;min-height:14px"></div></div>';
-  html += '<hr style="border:none;border-top:1px solid var(--border);margin:10px 0">';
-  html += '<div>';
-  html += '<div style="font-size:11px;font-weight:600;color:var(--text3);text-transform:uppercase;margin-bottom:6px">Activities</div>';
-  html += '<div id="cd-acts-'+id+'" style="font-size:12px;color:var(--text3)">Loading\u2026</div>';
-  html += '</div>';
-  return html;
-}}
-
-function openContactDetail(v) {{
-  _cdVenue = v;
-  const id = v.id;
-  document.getElementById('cd-title').textContent = v[_nameField] || '(unnamed)';
-  document.getElementById('cd-subtitle').innerHTML = statusBadge(sv(v['Contact Status']));
-  document.getElementById('cd-detail-body').innerHTML = _buildDetailHTML(v);
-  document.getElementById('cd-panel-detail').className = 'cd-panel active';
-  document.getElementById('cd-panel-tpl').className    = 'cd-panel';
-  document.getElementById('cd-overlay').classList.add('open');
-  document.body.style.overflow = 'hidden';
-  fetchAll(ACTS_TID).then(acts => {{
-    const mine = acts.filter(a => {{
-      const lf = a[ACTS_LINK];
-      return Array.isArray(lf) ? lf.some(r => r.id === id) : false;
-    }}).sort((a,b) => (b['Date']||'').localeCompare(a['Date']||''));
-    const el = document.getElementById('cd-acts-'+id);
-    if (el) el.innerHTML = mine.length ? mine.map(renderAct).join('')
-      : '<div style="color:var(--text3);padding:4px 0">No activities yet</div>';
-  }});
-}}
-
-function closeContactDetail() {{
-  document.getElementById('cd-overlay').classList.remove('open');
-  document.body.style.overflow = '';
-  _cdVenue = null;
-}}
-
-function showEmailTemplates(v, category) {{
-  if (!v) return;
-  const name = v[_nameField] || '(unnamed)';
-  const tmpls = (_TEMPLATES[category] || []);
-  let html = '<button class="cd-back-btn" onclick="_cdBackToDetail()">\u2190 Back to detail</button>';
-  html += '<div style="font-size:13px;font-weight:600;margin-bottom:12px">Choose a template for <strong>' + esc(name) + '</strong></div>';
-  html += '<div class="tpl-grid">';
-  tmpls.forEach(function(t, i) {{
-    const preview = t.body.replace(/\{{name\}}/g, name).substring(0, 160) + '\u2026';
-    html += '<div class="tpl-card">';
-    html += '<div class="tpl-card-name">' + esc(t.name) + '</div>';
-    html += '<div class="tpl-card-subj">Subject: ' + esc(t.subject) + '</div>';
-    html += '<div class="tpl-card-preview">' + esc(preview) + '</div>';
-    html += '<button class="tpl-use-btn" data-tpl-i="'+i+'" data-tpl-cat="'+category+'" onclick="useTemplate(+this.dataset.tplI,this.dataset.tplCat)">Use Template \u2192</button>';
-    html += '</div>';
-  }});
-  html += '</div>';
-  document.getElementById('cd-tpl-body').innerHTML = html;
-  document.getElementById('cd-panel-detail').className = 'cd-panel';
-  document.getElementById('cd-panel-tpl').className    = 'cd-panel active';
-}}
-
-function _cdBackToDetail() {{
-  document.getElementById('cd-panel-detail').className = 'cd-panel active';
-  document.getElementById('cd-panel-tpl').className    = 'cd-panel';
-}}
-
-function useTemplate(i, category) {{
-  const t = _TEMPLATES[category][i];
-  if (!t || !_cdVenue) return;
-  const name = _cdVenue[_nameField] || '';
-  const body = t.body.replace(/\{{name\}}/g, name);
-  document.getElementById('compose-to').value      = (_cdVenue['Email'] || '');
-  document.getElementById('compose-subject').value = t.subject;
-  document.getElementById('compose-body').value    = body;
-  document.getElementById('compose-status').textContent = '';
-  closeContactDetail();
-  document.getElementById('compose-overlay').classList.add('open');
-  setTimeout(function() {{
-    var toVal = document.getElementById('compose-to').value;
-    document.getElementById(toVal ? 'compose-subject' : 'compose-to').focus();
-  }}, 50);
-}}
-
-async function updateStatus(id, val) {{
-  const v = _venues.find(x => x.id === id);
-  if (v) v['Contact Status'] = {{value: val}};
-  const st = document.getElementById('cd-status-st-' + id);
-  if (st) st.textContent = 'Saving\u2026';
-  const r = await bpatch(VENUES_TID, id, {{'Contact Status': {{value: val}}}});
-  if (st) {{ st.textContent = r.ok ? '\u2713' : '\u2717'; setTimeout(() => {{ if(st) st.textContent=''; }}, 2000); }}
-}}
-
-async function saveFollowUp(id) {{
-  const val = (document.getElementById('cd-fu-' + id) || {{}}).value || null;
-  const v = _venues.find(x => x.id === id);
-  if (v) v['Follow-Up Date'] = val;
-  const st = document.getElementById('cd-fu-st-' + id);
-  if (st) st.textContent = 'Saving\u2026';
-  const r = await bpatch(VENUES_TID, id, {{'Follow-Up Date': val || null}});
-  if (st) {{ st.textContent = r.ok ? '\u2713' : '\u2717'; setTimeout(() => {{ if(st) st.textContent=''; }}, 2000); }}
-}}
-
-async function addNote(id) {{
-  const inputEl = document.getElementById('cd-note-in-' + id);
-  const text = (inputEl ? inputEl.value : '').trim();
-  if (!text) return;
-  const today = new Date().toISOString().split('T')[0];
-  const entry = '[' + today + '] ' + text;
-  const v = _venues.find(x => x.id === id);
-  const existing = (v && v['Notes'] ? v['Notes'].trim() : '');
-  const newNotes = existing ? entry + '\\n---\\n' + existing : entry;
-  if (v) v['Notes'] = newNotes;
-  if (inputEl) inputEl.value = '';
-  const logEl = document.getElementById('cd-notes-' + id);
-  if (logEl) logEl.innerHTML = renderNotes(newNotes);
-  const st = document.getElementById('cd-note-st-' + id);
-  if (st) st.textContent = 'Saving\u2026';
-  const r = await bpatch(VENUES_TID, id, {{'Notes': newNotes}});
-  if (st) {{ st.textContent = r.ok ? 'Saved \u2713' : 'Failed \u2717'; setTimeout(() => {{ if(st) st.textContent=''; }}, 2000); }}
-}}
-
-async function logActivity(id) {{
-  const btn = document.getElementById('cd-abtn-' + id);
-  const st  = document.getElementById('cd-act-st-' + id);
-  if (btn) btn.disabled = true;
-  if (st) st.textContent = 'Saving\u2026';
-  const date    = (document.getElementById('cd-adate-' + id) || {{}}).value || null;
-  const type    = (document.getElementById('cd-atype-' + id) || {{}}).value || 'Other';
-  const outcome = (document.getElementById('cd-aoutcome-' + id) || {{}}).value || '';
-  const person  = (document.getElementById('cd-aperson-' + id) || {{}}).value || '';
-  const summary = (document.getElementById('cd-asummary-' + id) || {{}}).value || '';
-  const fu      = (document.getElementById('cd-afu-' + id) || {{}}).value || null;
-  const payload = {{[ACTS_LINK]: [{{id}}], 'Date': date, 'Type': {{value: type}},
-    'Outcome': {{value: outcome}}, 'Contact Person': person, 'Summary': summary, 'Follow-Up Date': fu || null}};
-  try {{
-    const r = await bpost(ACTS_TID, payload);
-    if (r.ok) {{
-      const newAct = await r.json();
-      const el = document.getElementById('cd-acts-' + id);
-      if (el) el.innerHTML = renderAct(newAct) + (el.innerHTML.includes('No activities') ? '' : el.innerHTML);
-      if (document.getElementById('cd-asummary-' + id)) document.getElementById('cd-asummary-' + id).value = '';
-      if (document.getElementById('cd-aperson-' + id))  document.getElementById('cd-aperson-' + id).value  = '';
-      if (document.getElementById('cd-afu-' + id))      document.getElementById('cd-afu-' + id).value      = '';
-      if (fu) {{ const fuIn = document.getElementById('cd-fu-' + id); if (fuIn) {{ fuIn.value = fu; saveFollowUp(id); }} }}
-      if (st) {{ st.textContent = 'Saved \u2713'; setTimeout(() => {{ if(st) st.textContent=''; }}, 2000); }}
-    }} else {{
-      if (st) st.textContent = 'Failed \u2717';
-    }}
-  }} catch(e) {{ if (st) st.textContent = 'Error: ' + e.message; }}
-  if (btn) btn.disabled = false;
-}}
+// Keep _venues[] in sync with the modal's edits so list rendering reflects changes
+window._onContactUpdate = function(v) {{
+  _venues = _venues.map(function(x) {{ return x.id === v.id ? v : x; }});
+  applyFilters();
+}};
 
 function buildFilters() {{
   const bar = document.getElementById('filter-bar');
@@ -868,6 +642,10 @@ function _lookupFirmCounts(name) {{
         '#map-sidebar.open{transform:translateX(0);opacity:1;}'
         '#map-sidebar .sb-content{transition:opacity .15s ease;}'
         '#map-sidebar .sb-content.fading{opacity:0;}'
+        '@media(max-width:600px){'
+        '#map-sidebar{width:100%;border-left:none;}'
+        '#map-view{height:calc(100vh - 96px) !important;}'
+        '}'
         '</style>'
         '<div id="filter-bar" style="display:flex;align-items:center;gap:6px;padding:6px 14px;'
         'background:var(--bg2);border-bottom:1px solid var(--border);flex-wrap:wrap">'

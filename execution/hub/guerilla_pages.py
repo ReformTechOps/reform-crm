@@ -12,6 +12,7 @@ from .guerilla import (
     _GFR_JS, _GFR_FORMS345_JS,
     GFR_EXTRA_HTML, GFR_EXTRA_JS,
 )
+from .contact_detail import contact_actions_js, contact_detail_html, contact_detail_js
 
 
 # ===========================================================================
@@ -431,6 +432,8 @@ load();
 def _gorilla_routes_page(br: str, bt: str, user: dict = None) -> str:
     is_admin = _is_admin(user or {})
     user_email = (user or {}).get("email", "").strip().lower()
+    _contact_actions = contact_actions_js()
+    _contact_detail  = contact_detail_js()
     page_title = "Field Routes" if is_admin else "My Routes"
     page_sub   = "Outreach route management" if is_admin else "Routes assigned to you"
     create_btn = (
@@ -509,26 +512,14 @@ def _gorilla_routes_page(br: str, bt: str, user: dict = None) -> str:
 
 <!-- Missed stops panel (admin only) -->
 <div id="missed-content" class="admin-only"></div>
-
-<!-- Route detail modal -->
-<div class="cd-overlay" id="rdm-overlay" onclick="if(event.target===this)closeRouteDetail()">
-<div class="cd-modal" style="width:640px">
-<div class="cd-header">
-<div style="flex:1;min-width:0">
-  <div class="cd-title" id="rdm-title"></div>
-  <div id="rdm-subtitle" style="margin-top:4px;font-size:12px;color:var(--text3)"></div>
-</div>
-<div class="cd-header-actions">
-  <button class="cd-btn-close" onclick="closeRouteDetail()">&times;</button>
-</div>
-</div>
-<div class="cd-body" id="rdm-body"></div>
-</div>
-</div>
 """
+    body += contact_detail_html('gorilla')
     js = f"""
+const _TOOL_KEY = 'gorilla';
+{_contact_actions}
+{_contact_detail}
+
 var _stops = [];
-var _venues = {{}};
 var _allRoutes = [];
 var _acts = [];
 var _pendingBoxByVenue = {{}};
@@ -557,17 +548,15 @@ async function load() {{
     document.getElementById('routes-upcoming').innerHTML = '<div class="empty">Routes tables not configured.</div>';
     return;
   }}
-  var [routes, stops, venues, acts, boxes] = await Promise.all([
+  var [routes, stops, acts, boxes] = await Promise.all([
     fetchAll({T_GOR_ROUTES}),
     fetchAll({T_GOR_ROUTE_STOPS}),
-    fetchAll({T_GOR_VENUES}),
     fetchAll({T_GOR_ACTS}),
     fetchAll({T_GOR_BOXES}),
   ]);
   _stops = stops;
   _allRoutes = routes;
   _acts = acts;
-  venues.forEach(function(v) {{ _venues[v.id] = v; }});
 
   // Build pending-box map
   boxes.forEach(function(b) {{
@@ -699,7 +688,7 @@ function renderRouteCard(row) {{
   var pct = total ? Math.round(visited/total*100) : 0;
 
   var html = '<div class="route-card">';
-  html += '<div class="route-hd"><div><span class="route-name" style="cursor:pointer;text-decoration:underline dotted" onclick="openRouteDetail('+rid+')">'+esc(row['Name']||'(unnamed)')+'</span> '+badge+'</div>';
+  html += '<div class="route-hd"><div><span class="route-name" style="cursor:pointer;text-decoration:underline dotted" onclick="toggleDetailFromName('+rid+')">'+esc(row['Name']||'(unnamed)')+'</span> '+badge+'</div>';
   html += '<div style="display:flex;gap:6px;align-items:center">';
   html += '<button class="btn btn-ghost" style="padding:4px 10px;font-size:11px" onclick="setStatus('+rid+',this)">'+btnLabel+'</button>';
   html += '</div></div>';
@@ -731,7 +720,7 @@ function renderRouteCard(row) {{
       var sColor = ss==='Visited'?'#059669':ss==='Skipped'?'#f97316':ss==='Not Reached'?'#ef4444':'#94a3b8';
       var venueLink = s['Venue'];
       var vId = Array.isArray(venueLink) && venueLink.length ? venueLink[0].id : null;
-      var vName = vId && _venues[vId] ? (_venues[vId]['Name']||'(unnamed)') : '(unknown)';
+      var vName = (venueLink && venueLink.length && venueLink[0].value) || s['Name'] || '(unknown)';
       var sNotes = s['Notes'] || '';
       var sTime = s['Completed At'] || '';
       var sBy = s['Completed By'] || '';
@@ -741,13 +730,17 @@ function renderRouteCard(row) {{
 
       html += '<div class="route-stop-row" style="flex-wrap:wrap">';
       html += '<div class="route-stop-num" style="background:'+sColor+'">'+(i+1)+'</div>';
-      html += '<span style="flex:1;font-weight:500;min-width:0">'+esc(vName);
+      var nameHtml = vId ? '<span style="cursor:pointer;text-decoration:underline dotted var(--text3);text-underline-offset:3px" onclick="Contact.fetchVenue(\\'gorilla\\','+vId+').then(openContactDetail)">'+esc(vName)+'</span>' : esc(vName);
+      html += '<span style="flex:1;font-weight:500;min-width:0">'+nameHtml;
       if (pendingBox) {{
         var od = pendingBox.overdue_by > 0 ? (' '+pendingBox.overdue_by+'d overdue') : '';
         html += ' <span style="background:#f59e0b20;color:#f59e0b;font-size:9px;padding:1px 5px;border-radius:3px;font-weight:600;margin-left:4px">\U0001f4e6 pickup' + od + '</span>';
       }}
       html += '</span>';
       html += '<span style="font-size:11px;color:'+sColor+';font-weight:600">'+esc(ss)+'</span>';
+      if (vId && IS_ADMIN_VIEW) {{
+        html += ' <a href="/outreach/planner?tool=gorilla&venue='+vId+'" style="font-size:11px;color:#3b82f6;text-decoration:none;margin-left:4px" title="View on map">\U0001f5fa Map</a>';
+      }}
 
       var metaParts = [];
       if (sTime) metaParts.push('\u23f1 ' + esc(sTime));
@@ -793,8 +786,37 @@ function renderRouteCard(row) {{
     html += '</div>';
   }}
 
+  // Edit Route panel (admin-only, collapsible — was the old route-detail modal)
+  if (IS_ADMIN_VIEW) {{
+    html += '<div class="route-edit-wrap" style="border-top:1px solid var(--border);margin-top:12px;padding-top:10px">';
+    html += '<button class="route-toggle" onclick="toggleEdit(this,'+rid+')" style="color:var(--text3)">\u2699\ufe0f Edit route \u25be</button>';
+    html += '<div class="route-edit-body" id="re-'+rid+'" style="display:none;margin-top:10px">';
+    html += '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px">';
+    html += '<div><label style="font-size:10px;color:var(--text3)">Name</label>';
+    html += '<input type="text" id="re-name-'+rid+'" value="'+esc(row['Name']||'')+'" style="width:100%;background:var(--input-bg);border:1px solid var(--border);color:var(--text);border-radius:6px;padding:5px 8px;font-size:12px;box-sizing:border-box"></div>';
+    html += '<div><label style="font-size:10px;color:var(--text3)">Date</label>';
+    html += '<input type="date" id="re-date-'+rid+'" value="'+esc(row['Date']||'')+'" style="width:100%;background:var(--input-bg);border:1px solid var(--border);color:var(--text);border-radius:6px;padding:5px 8px;font-size:12px;box-sizing:border-box"></div>';
+    html += '</div>';
+    html += '<div style="margin-bottom:10px"><label style="font-size:10px;color:var(--text3)">Assigned To</label>';
+    html += '<input type="email" id="re-assignee-'+rid+'" value="'+esc(row['Assigned To']||'')+'" style="width:100%;background:var(--input-bg);border:1px solid var(--border);color:var(--text);border-radius:6px;padding:5px 8px;font-size:12px;box-sizing:border-box"></div>';
+    html += '<div style="display:flex;gap:8px;align-items:center">';
+    html += '<button onclick="saveRouteEdit('+rid+')" style="background:#3b82f6;color:#fff;border:none;border-radius:6px;padding:6px 14px;cursor:pointer;font-size:12px;font-weight:600">Save Changes</button>';
+    html += '<span id="re-save-st-'+rid+'" style="font-size:11px;color:#34a853"></span>';
+    html += '<button onclick="deleteRoute('+rid+')" style="margin-left:auto;background:none;color:#ef4444;border:1px solid #ef444440;border-radius:6px;padding:6px 14px;cursor:pointer;font-size:12px;font-weight:600">Delete Route</button>';
+    html += '</div>';
+    html += '</div></div>';
+  }}
+
   html += '</div>';
   return html;
+}}
+
+function toggleEdit(btn, rid) {{
+  var el = document.getElementById('re-'+rid);
+  if (!el) return;
+  var open = el.style.display !== 'none';
+  el.style.display = open ? 'none' : 'block';
+  btn.innerHTML = open ? '\u2699\ufe0f Edit route \u25be' : '\u2699\ufe0f Edit route \u25b4';
 }}
 
 function toggleDetail(btn, rid) {{
@@ -911,12 +933,13 @@ function renderMissedStops() {{
       var sColor = ss==='Skipped' ? '#f97316' : '#ef4444';
       var venueLink = s['Venue'];
       var vId = Array.isArray(venueLink) && venueLink.length ? venueLink[0].id : null;
-      var vName = vId && _venues[vId] ? (_venues[vId]['Name']||'(unnamed)') : '(unknown)';
+      var vName = (venueLink && venueLink.length && venueLink[0].value) || s['Name'] || '(unknown)';
       var notes = s['Notes'] || '';
       html += '<div class="missed-stop-row">';
       html += '<div class="route-stop-num" style="background:'+sColor+'">' + (s['Stop Order']||'?') + '</div>';
       html += '<div style="flex:1;min-width:0">';
-      html += '<div style="font-weight:600">'+esc(vName)+'</div>';
+      var missedNameHtml = vId ? '<span style="cursor:pointer;text-decoration:underline dotted var(--text3);text-underline-offset:3px" onclick="Contact.fetchVenue(\\'gorilla\\','+vId+').then(openContactDetail)">'+esc(vName)+'</span>' : esc(vName);
+      html += '<div style="font-weight:600">'+missedNameHtml+'</div>';
       if (notes) html += '<div style="font-size:11px;color:var(--text3);margin-top:2px">Reason: '+esc(notes)+'</div>';
       html += '</div>';
       html += '<span style="font-size:11px;color:'+sColor+';font-weight:600">'+esc(ss)+'</span>';
@@ -928,111 +951,23 @@ function renderMissedStops() {{
 }}
 
 // ── Route Detail Modal ───────────────────────────────────────────
-function openRouteDetail(routeId) {{
-  var route = _allRoutes.find(function(r){{return r.id===routeId;}});
-  if (!route) return;
-  var status = sv(route['Status']) || 'Draft';
-  var sc = status === 'Active' ? '#059669' : status === 'Completed' ? '#2563eb' : '#475569';
-  var badge = '<span style="font-size:11px;background:'+sc+'20;color:'+sc+';border-radius:4px;padding:2px 7px;font-weight:600">'+esc(status)+'</span>';
-  document.getElementById('rdm-title').innerHTML = esc(route['Name']||'(unnamed)') + ' ' + badge;
-  document.getElementById('rdm-subtitle').textContent = fmt(route['Date']||'') + ' \u2022 ' + (route['Assigned To']||'unassigned');
-
-  var myStops = _stops.filter(function(s) {{
-    var r = s['Route']; return Array.isArray(r) && r.some(function(x){{return x.id===routeId;}});
-  }}).sort(function(a,b) {{ return (a['Stop Order']||0) - (b['Stop Order']||0); }});
-  var visited=0, skipped=0, notReached=0, pending=0;
-  myStops.forEach(function(s) {{
-    var ss = sv(s['Status']) || 'Pending';
-    if (ss==='Visited') visited++; else if (ss==='Skipped') skipped++;
-    else if (ss==='Not Reached') notReached++; else pending++;
-  }});
-  var total = myStops.length;
-  var pct = total ? Math.round(visited/total*100) : 0;
-
-  var html = '';
-  // Stats row
-  html += '<div style="display:flex;gap:16px;margin-bottom:14px;font-size:12px;font-weight:600">';
-  html += '<span style="color:#059669">'+visited+' visited</span>';
-  html += '<span style="color:#f97316">'+skipped+' skipped</span>';
-  html += '<span style="color:#ef4444">'+notReached+' missed</span>';
-  html += '<span style="color:#94a3b8">'+pending+' pending</span>';
-  html += '<span style="margin-left:auto;color:'+sc+'">'+pct+'%</span>';
-  html += '</div>';
-  html += '<div style="height:4px;background:var(--border);border-radius:2px;overflow:hidden;margin-bottom:16px">';
-  html += '<div style="height:100%;width:'+pct+'%;background:#059669;border-radius:2px"></div></div>';
-
-  // Stops list
-  html += '<div style="font-size:11px;font-weight:600;color:var(--text3);text-transform:uppercase;margin-bottom:8px">Stops</div>';
-  var routeDate = (route['Date']||'').substring(0,10);
-  myStops.forEach(function(s, i) {{
-    var ss = sv(s['Status']) || 'Pending';
-    var sColor = ss==='Visited'?'#059669':ss==='Skipped'?'#f97316':ss==='Not Reached'?'#ef4444':'#94a3b8';
-    var venueLink = s['Venue'];
-    var vId = Array.isArray(venueLink) && venueLink.length ? venueLink[0].id : null;
-    var vName = vId && _venues[vId] ? (_venues[vId]['Name']||'(unnamed)') : (s['Name']||'(unknown)');
-    var sNotes = s['Notes'] || '';
-    var sTime = s['Completed At'] || '';
-    var sBy = s['Completed By'] || '';
-    var pendingBox = _pendingBoxByVenue[vId];
-
-    html += '<div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--border);flex-wrap:wrap">';
-    html += '<div class="route-stop-num" style="background:'+sColor+'">'+(i+1)+'</div>';
-    html += '<div style="flex:1;min-width:0">';
-    html += '<div style="font-weight:600;font-size:13px">'+esc(vName);
-    if (pendingBox) {{
-      var od = pendingBox.overdue_by > 0 ? (' '+pendingBox.overdue_by+'d overdue') : '';
-      html += ' <span style="background:#f59e0b20;color:#f59e0b;font-size:9px;padding:1px 5px;border-radius:3px;font-weight:600">\U0001f4e6 pickup'+od+'</span>';
-    }}
-    html += '</div>';
-    var metaParts = [];
-    if (sTime) metaParts.push('\u23f1 '+esc(sTime));
-    if (sBy) metaParts.push('\U0001f464 '+esc(sBy));
-    if (sNotes) metaParts.push('\u270f\ufe0f '+esc(sNotes));
-    if (metaParts.length) html += '<div style="font-size:11px;color:var(--text3);margin-top:2px">'+metaParts.join(' \u2022 ')+'</div>';
-    html += '</div>';
-    html += '<span style="font-size:11px;color:'+sColor+';font-weight:600">'+esc(ss)+'</span>';
-    if (vId) {{
-      html += ' <a href="/outreach/planner?tool=gorilla&venue='+vId+'" style="font-size:11px;color:#3b82f6;text-decoration:none;margin-left:4px" title="View on map">\U0001f5fa Map</a>';
-    }}
-    html += '</div>';
-  }});
-
-  // Edit section (admin only)
-  if (IS_ADMIN_VIEW) {{
-    html += '<div style="border-top:1px solid var(--border);margin-top:16px;padding-top:14px">';
-    html += '<div style="font-size:11px;font-weight:600;color:var(--text3);text-transform:uppercase;margin-bottom:8px">Edit Route</div>';
-    html += '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px">';
-    html += '<div><label style="font-size:10px;color:var(--text3)">Name</label>';
-    html += '<input type="text" id="rdm-name" value="'+esc(route['Name']||'')+'" style="width:100%;background:var(--input-bg);border:1px solid var(--border);color:var(--text);border-radius:6px;padding:5px 8px;font-size:12px;box-sizing:border-box"></div>';
-    html += '<div><label style="font-size:10px;color:var(--text3)">Date</label>';
-    html += '<input type="date" id="rdm-date" value="'+esc(route['Date']||'')+'" style="width:100%;background:var(--input-bg);border:1px solid var(--border);color:var(--text);border-radius:6px;padding:5px 8px;font-size:12px;box-sizing:border-box"></div>';
-    html += '</div>';
-    html += '<div style="margin-bottom:10px"><label style="font-size:10px;color:var(--text3)">Assigned To</label>';
-    html += '<input type="email" id="rdm-assignee" value="'+esc(route['Assigned To']||'')+'" style="width:100%;background:var(--input-bg);border:1px solid var(--border);color:var(--text);border-radius:6px;padding:5px 8px;font-size:12px;box-sizing:border-box"></div>';
-    html += '<div style="display:flex;gap:8px;align-items:center">';
-    html += '<button onclick="saveRouteEdit('+routeId+')" style="background:#3b82f6;color:#fff;border:none;border-radius:6px;padding:6px 14px;cursor:pointer;font-size:12px;font-weight:600">Save Changes</button>';
-    html += '<span id="rdm-save-st" style="font-size:11px;color:#34a853"></span>';
-    html += '<button onclick="deleteRoute('+routeId+')" style="margin-left:auto;background:none;color:#ef4444;border:1px solid #ef444440;border-radius:6px;padding:6px 14px;cursor:pointer;font-size:12px;font-weight:600">Delete Route</button>';
-    html += '</div></div>';
-  }}
-
-  document.getElementById('rdm-body').innerHTML = html;
-  document.getElementById('rdm-overlay').classList.add('open');
-  document.body.style.overflow = 'hidden';
-}}
-
-function closeRouteDetail() {{
-  document.getElementById('rdm-overlay').classList.remove('open');
-  document.body.style.overflow = '';
+function toggleDetailFromName(rid) {{
+  // Clicking a route name (dotted-underline) scrolls its card into view
+  // and expands the stops drawer if it is collapsed.
+  var card = document.getElementById('rd-' + rid);
+  if (!card) return;
+  var btn = card.previousElementSibling; // the 'Show stops' toggle button
+  if (!card.classList.contains('open') && btn) toggleDetail(btn, rid);
+  card.scrollIntoView({{behavior:'smooth', block:'center'}});
 }}
 
 async function saveRouteEdit(routeId) {{
-  var st = document.getElementById('rdm-save-st');
+  var st = document.getElementById('re-save-st-' + routeId);
   if (st) st.textContent = 'Saving\u2026';
   var payload = {{
-    name: (document.getElementById('rdm-name')||{{}}).value || '',
-    date: (document.getElementById('rdm-date')||{{}}).value || '',
-    assigned_to: (document.getElementById('rdm-assignee')||{{}}).value || ''
+    name: (document.getElementById('re-name-' + routeId)||{{}}).value || '',
+    date: (document.getElementById('re-date-' + routeId)||{{}}).value || '',
+    assigned_to: (document.getElementById('re-assignee-' + routeId)||{{}}).value || ''
   }};
   try {{
     var r = await fetch('/api/guerilla/routes/' + routeId, {{
@@ -1042,7 +977,7 @@ async function saveRouteEdit(routeId) {{
     var d = await r.json();
     if (d.ok) {{
       if (st) st.textContent = 'Saved \u2713';
-      setTimeout(function(){{ closeRouteDetail(); load(); }}, 600);
+      setTimeout(function(){{ load(); }}, 600);
     }} else {{
       if (st) st.textContent = 'Failed: ' + (d.error||'unknown');
     }}
@@ -1057,7 +992,6 @@ async function deleteRoute(routeId) {{
     }});
     var d = await r.json();
     if (d.ok) {{
-      closeRouteDetail();
       load();
     }} else {{
       alert('Failed to delete: ' + (d.error||'unknown'));
@@ -1188,7 +1122,7 @@ function _renderVenueResults(matches) {{
   var html = '<div style="border:1px solid var(--border);border-radius:6px;overflow:hidden">';
   matches.forEach(function(v) {{
     html += '<div style="padding:8px 12px;cursor:pointer;border-bottom:1px solid var(--border);font-size:13px" '
-      + "onmouseenter=\"this.style.background='var(--bg2)'\" onmouseleave=\"this.style.background=''\" "
+      + "onmouseenter=\\\"this.style.background='var(--bg2)'\\\" onmouseleave=\\\"this.style.background=''\\\" "
       + 'onclick="addStop('+v['id']+','+JSON.stringify(esc(v['Name']||''))+','+JSON.stringify(esc(v['Address']||''))+')">'
       + '<strong>'+esc(v['Name']||'')+'</strong>'
       + _pendingBoxBadge(v['id'])

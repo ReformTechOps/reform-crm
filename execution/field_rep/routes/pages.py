@@ -1,0 +1,99 @@
+"""
+Page routes for the field-rep app.
+
+Ports the hub's `/m/*` handlers to root URLs (since the whole app IS the
+mobile app now). Page bodies come from `hub.mobile` — we only register the
+URLs and wire in the auth guard.
+
+    hub /m          -> routes /
+    hub /m/routes   -> routes /routes
+    hub /m/route    -> routes /route
+    hub /m/lead     -> routes /lead
+    hub /m/recent   -> routes /recent
+    hub /m/map      -> routes /map   (admin-only, same as hub)
+    hub /m/log      -> routes /log   (legacy redirect to /map)
+"""
+import os
+
+from fastapi import APIRouter, Request
+from fastapi.responses import HTMLResponse, RedirectResponse
+
+from hub.access import _is_admin
+from hub.mobile import (
+    _mobile_home_page,
+    _mobile_lead_capture_page,
+    _mobile_map_page,
+    _mobile_recent_page,
+    _mobile_route_page,
+    _mobile_routes_dashboard_page,
+)
+
+from ..auth import get_session
+
+router = APIRouter()
+
+
+async def _guard(request: Request):
+    """Return (session, br, bt) or (None, None, None) if unauthenticated."""
+    session = await get_session(request)
+    if not session:
+        return None, None, None
+    br = os.environ.get("BASEROW_URL", "")
+    bt = os.environ.get("BASEROW_API_TOKEN", "")
+    return session, br, bt
+
+
+@router.get("/", response_class=HTMLResponse)
+async def home(request: Request):
+    user, br, bt = await _guard(request)
+    if not user:
+        return RedirectResponse(url="/login")
+    return HTMLResponse(_mobile_home_page(br, bt, user=user))
+
+
+@router.get("/routes", response_class=HTMLResponse)
+async def routes_dashboard(request: Request):
+    user, br, bt = await _guard(request)
+    if not user:
+        return RedirectResponse(url="/login")
+    return HTMLResponse(_mobile_routes_dashboard_page(br, bt, user=user))
+
+
+@router.get("/route", response_class=HTMLResponse)
+async def route_detail(request: Request):
+    user, br, bt = await _guard(request)
+    if not user:
+        return RedirectResponse(url="/login")
+    return HTMLResponse(_mobile_route_page(br, bt, user=user))
+
+
+@router.get("/lead", response_class=HTMLResponse)
+async def lead_capture(request: Request):
+    user, br, bt = await _guard(request)
+    if not user:
+        return RedirectResponse(url="/login")
+    return HTMLResponse(_mobile_lead_capture_page(br, bt, user=user))
+
+
+@router.get("/recent", response_class=HTMLResponse)
+async def recent(request: Request):
+    user, br, bt = await _guard(request)
+    if not user:
+        return RedirectResponse(url="/login")
+    return HTMLResponse(_mobile_recent_page(br, bt, user=user))
+
+
+@router.get("/map", response_class=HTMLResponse)
+async def field_map(request: Request):
+    user, br, bt = await _guard(request)
+    if not user:
+        return RedirectResponse(url="/login")
+    if not _is_admin(user):
+        return RedirectResponse(url="/")
+    return HTMLResponse(_mobile_map_page(br, bt, user=user))
+
+
+@router.get("/log")
+async def log_redirect():
+    """Legacy path from earlier hub iteration; keep redirecting so old bookmarks still land."""
+    return RedirectResponse(url="/map", status_code=302)
