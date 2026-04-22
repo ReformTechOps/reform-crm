@@ -103,10 +103,10 @@ def _mobile_page(active: str, title: str, body_html: str, script_js: str,
     admin = _is_admin(user)
     bnav = (
         '<nav class="mobile-bnav">'
-        + bnav_btn('m_home',   '\U0001f3e0', 'Home',   '/m')
-        + (bnav_btn('m_map',   '\U0001f4cd', 'Map',    '/m/map') if admin else '')
-        + bnav_btn('m_routes', '\U0001f5fa\ufe0f', 'Routes', '/m/routes')
-        + bnav_btn('m_recent', '\u23f1\ufe0f', 'Recent', '/m/recent')
+        + bnav_btn('m_home',   '\U0001f3e0', 'Home',   '/')
+        + (bnav_btn('m_map',   '\U0001f4cd', 'Map',    '/map') if admin else '')
+        + bnav_btn('m_routes', '\U0001f5fa\ufe0f', 'Routes', '/routes')
+        + bnav_btn('m_recent', '\u23f1\ufe0f', 'Recent', '/recent')
         + '</nav>'
     )
     wrap_class = f'mobile-wrap {wrap_cls}'.strip()
