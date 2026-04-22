@@ -90,6 +90,38 @@ async def table_data(tid: int, request: Request):
     return JSONResponse(rows)
 
 
+# ─── Cross-app cache invalidation (hub → field_rep webhook) ──────────────────
+# When an admin writes to a guerilla table on the Modal hub, the hub POSTs
+# here so field_rep's Redis cache for that table gets dropped and the next
+# mobile read pulls fresh data. Without this, reps see stale data until TTL
+# expires (~5min depending on cache config).
+#
+# Token-gated with FIELD_REP_INVALIDATE_TOKEN to prevent random DoS. The
+# hub's matching FIELD_REP_INVALIDATE_TOKEN comes from the `field-rep-sync`
+# Modal secret.
+@router.post("/api/invalidate")
+async def invalidate_cache(request: Request):
+    expected = os.environ.get("FIELD_REP_INVALIDATE_TOKEN", "").strip()
+    if not expected:
+        return JSONResponse({"ok": False, "error": "not configured"}, status_code=503)
+    supplied = request.headers.get("X-Invalidate-Token", "").strip()
+    if supplied != expected:
+        return JSONResponse({"ok": False, "error": "unauthorized"}, status_code=401)
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    tids = body.get("tids") or []
+    invalidated: list[int] = []
+    for tid in tids:
+        try:
+            await storage.invalidate_table(int(tid))
+            invalidated.append(int(tid))
+        except Exception:
+            pass
+    return JSONResponse({"ok": True, "invalidated": invalidated})
+
+
 # ─── Guerilla activity log ───────────────────────────────────────────────────
 @router.post("/api/guerilla/log")
 async def guerilla_log(request: Request):

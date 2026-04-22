@@ -952,6 +952,7 @@ async def poll_social_inbox():
         modal.Secret.from_name("clickup-api"),
         modal.Secret.from_name("meta-secrets"),
         modal.Secret.from_name("tiktok-secrets"),
+        modal.Secret.from_name("field-rep-sync"),
     ],
     min_containers=1,
 )
@@ -2748,12 +2749,43 @@ def web():
 
 
     # ── Massage Box CRUD ──────────────────────────────────────────────────────
+    # Tables the field_rep app (Coolify) mirrors in its Redis cache. When the
+    # hub writes to any of these, we POST the TID to field_rep's /api/invalidate
+    # so reps see fresh data immediately instead of waiting for TTL to expire.
+    _FIELD_REP_CACHE_TIDS = {T_GOR_VENUES, T_GOR_BOXES, T_GOR_ROUTES, T_GOR_ROUTE_STOPS}
+
+    async def _notify_field_rep_invalidate(*tids: int) -> None:
+        """Fire-and-forget cache-bust to field_rep. Non-fatal on any error."""
+        url   = os.environ.get("FIELD_REP_INVALIDATE_URL", "").strip()
+        token = os.environ.get("FIELD_REP_INVALIDATE_TOKEN", "").strip()
+        if not url or not token or not tids:
+            return
+        try:
+            async with httpx.AsyncClient(timeout=5) as client:
+                await client.post(
+                    url,
+                    json={"tids": list(tids)},
+                    headers={"X-Invalidate-Token": token},
+                )
+        except Exception:
+            pass  # field_rep being down must not break hub writes
+
     def _invalidate(*tids: int) -> None:
         for tid in tids:
             try:
                 hub_cache.pop(f"table:{tid}", None)
             except Exception:
                 pass
+        # Mirror the invalidation to the field_rep app for tables it caches.
+        # Fire-and-forget via asyncio.create_task so the hub handler doesn't
+        # block on the cross-app HTTP round-trip.
+        mirror_tids = [t for t in tids if t in _FIELD_REP_CACHE_TIDS]
+        if mirror_tids:
+            try:
+                import asyncio as _asyncio
+                _asyncio.create_task(_notify_field_rep_invalidate(*mirror_tids))
+            except RuntimeError:
+                pass  # Not in an event loop — skip cross-app notify
 
     @fapp.post("/api/guerilla/boxes")
     async def create_box(request: Request):
