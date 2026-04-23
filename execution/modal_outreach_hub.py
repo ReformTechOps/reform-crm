@@ -2894,6 +2894,17 @@ def web():
         _invalidate(T_GOR_ROUTES, T_GOR_ROUTE_STOPS)
         return resp
 
+    @fapp.post("/api/guerilla/routes/{route_id}/stops")
+    async def gorilla_route_append_stop(request: Request, route_id: int):
+        session = _get_session(request)
+        if not session:
+            return JSONResponse({"error": "unauthenticated"}, status_code=401)
+        env = _env()
+        resp = await guerilla_api.gorilla_route_append_stop(request, env["br"], env["bt"], session,
+                                                            route_id, _hub_cached_rows)
+        _invalidate(T_GOR_ROUTE_STOPS)
+        return resp
+
     @fapp.delete("/api/guerilla/routes/{route_id}")
     async def gorilla_route_delete(request: Request, route_id: int):
         session = _get_session(request)
@@ -5735,6 +5746,23 @@ if __name__ == "__main__":
     @local_app.patch("/api/guerilla/routes/{route_id}")
     async def _gorilla_route_update(route_id: int, request: Request):
         return await gorilla_route_update(request, route_id)
+
+    @local_app.post("/api/guerilla/routes/{route_id}/stops")
+    async def _gorilla_route_append_stop(route_id: int, request: Request):
+        session = _get_session(request)
+        if not session:
+            return JSONResponse({"error": "unauthenticated"}, status_code=401)
+        env = _env()
+
+        async def _local_cached_rows(tid: int) -> list:
+            return await _cached_table(tid, env["br"], env["bt"])
+
+        resp = await guerilla_api.gorilla_route_append_stop(
+            request, env["br"], env["bt"], session, route_id, _local_cached_rows
+        )
+        try: del hub_cache[f"table:{T_GOR_ROUTE_STOPS}"]
+        except Exception: pass
+        return resp
 
     @local_app.delete("/api/guerilla/routes/{route_id}")
     async def _gorilla_route_delete(route_id: int, request: Request):

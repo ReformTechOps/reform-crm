@@ -758,6 +758,60 @@ async def gorilla_routes_create(request: Request, br: str, bt: str,
     return JSONResponse({"ok": True, "route_id": route_id})
 
 
+async def gorilla_route_append_stop(request: Request, br: str, bt: str, user: dict,
+                                    route_id: int,
+                                    cached_rows: CachedRowsFn) -> JSONResponse:
+    """Append a single stop to an existing route.
+
+    Field-rep allowed (not admin-gated) as long as the route is assigned to them.
+    Used by the home-page 'Boxes Due' panel to queue a box pickup on today's route.
+    """
+    if not _has_hub_access(user, "guerilla"):
+        return JSONResponse({"error": "forbidden"}, status_code=403)
+    if not T_GOR_ROUTES or not T_GOR_ROUTE_STOPS:
+        return JSONResponse({"error": "routes not configured"}, status_code=503)
+    body = await request.json()
+    try:
+        venue_id = int(body.get("venue_id"))
+    except (ValueError, TypeError):
+        return JSONResponse({"error": "venue_id required"}, status_code=400)
+    stop_name = (body.get("name") or "").strip()
+
+    async with httpx.AsyncClient(timeout=30) as client:
+        rr = await client.get(
+            f"{br}/api/database/rows/table/{T_GOR_ROUTES}/{route_id}/?user_field_names=true",
+            headers={"Authorization": f"Token {bt}"},
+        )
+        if rr.status_code != 200:
+            return JSONResponse({"error": "route not found"}, status_code=404)
+        route = rr.json()
+        assignee = (route.get("Assigned To") or "").strip().lower()
+        user_email = (user.get("email") or "").strip().lower()
+        if not _is_admin(user) and assignee != user_email:
+            return JSONResponse({"error": "not your route"}, status_code=403)
+
+        all_stops = await cached_rows(T_GOR_ROUTE_STOPS)
+        existing = [s for s in all_stops
+                    if any(x.get("id") == route_id for x in (s.get("Route") or []))]
+        next_order = max((int(s.get("Stop Order") or 0) for s in existing), default=0) + 1
+
+        payload = {
+            "Route":      [route_id],
+            "Venue":      [venue_id],
+            "Stop Order": next_order,
+            "Status":     "Pending",
+            "Name":       stop_name,
+        }
+        sr = await client.post(
+            f"{br}/api/database/rows/table/{T_GOR_ROUTE_STOPS}/?user_field_names=true",
+            headers={"Authorization": f"Token {bt}", "Content-Type": "application/json"},
+            json=payload,
+        )
+    if sr.status_code in (200, 201):
+        return JSONResponse({"ok": True, "stop_id": sr.json().get("id"), "stop_order": next_order})
+    return JSONResponse({"error": sr.text}, status_code=sr.status_code)
+
+
 async def gorilla_route_status(request: Request, br: str, bt: str, user: dict,
                                route_id: int) -> JSONResponse:
     if not _is_admin(user):

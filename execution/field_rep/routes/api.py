@@ -316,6 +316,19 @@ async def gorilla_route_update(request: Request, route_id: int):
     return resp
 
 
+@router.post("/api/guerilla/routes/{route_id}/stops")
+async def gorilla_route_append_stop(request: Request, route_id: int):
+    session = await get_session(request)
+    if not session:
+        return JSONResponse({"error": "unauthenticated"}, status_code=401)
+    br, bt = _env()
+    resp = await guerilla_api.gorilla_route_append_stop(
+        request, br, bt, session, route_id, _cached_rows
+    )
+    await _invalidate(T_GOR_ROUTE_STOPS)
+    return resp
+
+
 @router.delete("/api/guerilla/routes/{route_id}")
 async def gorilla_route_delete(request: Request, route_id: int):
     session = await get_session(request)

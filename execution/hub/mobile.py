@@ -60,6 +60,13 @@ def _mobile_home_page(br: str, bt: str, user: dict = None) -> str:
         '<span class="panel-ct" id="attn-ct">—</span></div>'
         '<div class="panel-body" id="attn-body"><div class="loading" style="padding:16px">Loading…</div></div>'
         '</div>'
+
+        # Massage Boxes panel
+        '<div class="panel">'
+        '<div class="panel-hd"><span class="panel-title">📦 Massage Boxes</span>'
+        '<span class="panel-ct" id="box-ct">—</span></div>'
+        '<div class="panel-body" id="box-body"><div class="loading" style="padding:16px">Loading…</div></div>'
+        '</div>'
         '</div>'
     )
     user_email = (user.get('email', '') or '').strip().lower()
@@ -69,10 +76,11 @@ const USER_EMAIL = {repr(user_email)};
 const TOOL = {{ venuesT: {T_GOR_VENUES} }};
 
 async function loadHomeDashboard() {{
-  const [routes, stops, leads, overdueResp] = await Promise.all([
+  const [routes, stops, leads, boxes, overdueResp] = await Promise.all([
     fetchAll({T_GOR_ROUTES}),
     fetchAll({T_GOR_ROUTE_STOPS}),
     fetchAll({T_LEADS}),
+    fetchAll({T_GOR_BOXES}),
     fetch('/api/outreach/due').then(r => r.ok ? r.json() : []).catch(() => [])
   ]);
 
@@ -131,6 +139,66 @@ async function loadHomeDashboard() {{
     </a>
   `).join('') : '<div class="empty" style="padding:16px 18px;color:var(--text3);font-size:13px">All caught up ✓</div>';
 
+  // Massage Boxes: all active, sorted by most overdue first
+  const activeBoxes = boxes.filter(b => sv(b['Status']) === 'Active' && b['Date Placed']);
+  const rows = activeBoxes.map(b => {{
+    const placed = (b['Date Placed'] || '').slice(0, 10);
+    const pickupDays = parseInt(b['Pickup Days']) || 14;
+    const age = -daysUntil(placed);
+    const overdue = age - pickupDays;
+    const biz = (b['Business'] || [])[0] || {{}};
+    return {{ boxId: b.id, venueId: biz.id, venueName: biz.value || 'Unknown venue',
+             placed, age, pickupDays, overdue }};
+  }});
+  rows.sort((a, b) => b.overdue - a.overdue);
+  window._boxRows = rows;
+
+  document.getElementById('box-ct').textContent = rows.length + ' active';
+  const routeId = todayRoute ? todayRoute.id : null;
+  document.getElementById('box-body').innerHTML = rows.length ? rows.map((x, i) => {{
+    let badge;
+    if (x.overdue > 0) badge = '<span style="background:#ef444420;color:#ef4444;border-radius:4px;padding:2px 7px;font-size:11px;font-weight:600">' + x.overdue + 'd overdue</span>';
+    else if (x.overdue === 0) badge = '<span style="background:#f59e0b20;color:#f59e0b;border-radius:4px;padding:2px 7px;font-size:11px;font-weight:600">due today</span>';
+    else if (x.overdue >= -2) badge = '<span style="background:#f59e0b20;color:#f59e0b;border-radius:4px;padding:2px 7px;font-size:11px;font-weight:600">due in ' + (-x.overdue) + 'd</span>';
+    else badge = '<span style="background:#05966920;color:#059669;border-radius:4px;padding:2px 7px;font-size:11px;font-weight:600">' + (-x.overdue) + 'd left</span>';
+    const btn = (routeId && x.venueId)
+      ? '<button id="box-add-' + i + '" onclick="addBoxToTodayRoute(' + i + ')" style="background:#ea580c;color:#fff;border:none;border-radius:6px;padding:7px 11px;font-size:12px;font-weight:600;cursor:pointer;min-height:34px;white-space:nowrap">+ Add</button>'
+      : '<span style="font-size:10px;color:var(--text4)">' + (routeId ? 'no venue' : 'no active route') + '</span>';
+    return '<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;padding:10px 18px;border-bottom:1px solid var(--border)">'
+      + '<div style="flex:1;min-width:0">'
+      +   '<div style="font-size:14px;font-weight:600;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">' + esc(x.venueName) + '</div>'
+      +   '<div style="margin-top:4px">' + badge + ' <span style="font-size:11px;color:var(--text3)">placed ' + esc(fmt(x.placed)) + '</span></div>'
+      + '</div>' + btn + '</div>';
+  }}).join('') : '<div class="empty" style="padding:16px 18px;color:var(--text3);font-size:13px">No active boxes</div>';
+  window._todayRouteId = routeId;
+}}
+
+async function addBoxToTodayRoute(idx) {{
+  const x = (window._boxRows || [])[idx];
+  const routeId = window._todayRouteId;
+  if (!x || !routeId || !x.venueId) return;
+  const btn = document.getElementById('box-add-' + idx);
+  if (btn) {{ btn.disabled = true; btn.textContent = '…'; }}
+  try {{
+    const r = await fetch('/api/guerilla/routes/' + routeId + '/stops', {{
+      method: 'POST',
+      headers: {{'Content-Type': 'application/json'}},
+      body: JSON.stringify({{venue_id: x.venueId, name: 'Box pickup: ' + x.venueName}})
+    }});
+    if (!r.ok) {{
+      const err = await r.json().catch(() => ({{}}));
+      if (btn) {{ btn.disabled = false; btn.textContent = '+ Add'; }}
+      alert('Could not add: ' + (err.error || r.status));
+      return;
+    }}
+    if (btn) {{
+      btn.style.background = '#059669';
+      btn.textContent = '✓ Added';
+    }}
+  }} catch (e) {{
+    if (btn) {{ btn.disabled = false; btn.textContent = '+ Add'; }}
+    alert('Network error — try again');
+  }}
 }}
 
 loadHomeDashboard().catch(err => console.error('Dashboard load failed:', err));
