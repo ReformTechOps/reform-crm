@@ -62,7 +62,7 @@ from hub.pi_cases import _patients_page, _firms_page
 from hub.billing import _billing_page
 from hub.comms import _contacts_page, _communications_email_page
 from hub.social import _social_schedule_page, _social_monitor_page, _social_inbox_page
-from hub.events import _event_detail_page, _lead_form_page, _leads_dashboard_page
+from hub.events import _event_detail_page, _lead_form_page, _leads_dashboard_page, _events_index_page
 from hub import guerilla_api
 
 app = modal.App("outreach-hub")
@@ -4108,11 +4108,18 @@ function copyIt(id, btn) {{
 
     # ── Events & Leads ─────────────────────────────────────────────────────────
 
+    @fapp.get("/events", response_class=HTMLResponse)
+    async def events_index(request: Request):
+        user, br, bt = _guard(request)
+        if not user: return RedirectResponse(url="/login")
+        if not _has_hub_access(user, "events"): return RedirectResponse(url="/")
+        return HTMLResponse(_events_index_page(br, bt, user=user))
+
     @fapp.get("/events/{event_id}", response_class=HTMLResponse)
     async def event_detail(request: Request, event_id: int):
         user, br, bt = _guard(request)
         if not user: return RedirectResponse(url="/login")
-        if not _has_hub_access(user, "guerilla"): return RedirectResponse(url="/")
+        if not _has_hub_access(user, "events"): return RedirectResponse(url="/")
         return HTMLResponse(_event_detail_page(event_id, br, bt, user=user))
 
     @fapp.get("/leads/by-event", response_class=HTMLResponse)
@@ -5272,6 +5279,23 @@ function copyIt(id, btn) {{
         _invalidate(T_LEADS)
         return JSONResponse({"ok": True, **result})
 
+    _EVENT_STATUSES = {
+        "Prospective", "Maybe", "Approved", "Declined", "Scheduled", "Completed",
+    }
+    _EVENT_PATCH_ALLOWLIST = {
+        "Event Status", "Est Insurance Pct", "Other Chiropractor",
+        "Doctors Needed", "Front Desk Needed", "Therapists Needed",
+        "Generator Needed", "Table Needed", "EZ Up Needed",
+        "Promotion", "Services Rendered", "Materials Needed",
+        "Decision Notes", "Anticipated Count", "Organizer", "Organizer Phone",
+        "Cost", "Duration", "Venue Address", "Event Date", "Name",
+    }
+    _EVENT_OTHER_CHIRO = {"Yes", "No", "Unknown"}
+    _EVENT_TYPES = {
+        "External Event", "Mobile Massage Service",
+        "Lunch and Learn", "Health Assessment Screening",
+    }
+
     @fapp.patch("/api/events/{event_id}/status")
     async def update_event_status(request: Request, event_id: int):
         session = _get_session(request)
@@ -5279,7 +5303,7 @@ function copyIt(id, btn) {{
             return JSONResponse({"error": "unauthenticated"}, status_code=401)
         body = await request.json()
         status = body.get("status", "")
-        if status not in ("Prospective", "Approved", "Scheduled", "Completed"):
+        if status not in _EVENT_STATUSES:
             return JSONResponse({"error": "invalid status"}, status_code=400)
         env = _env()
         async with httpx.AsyncClient(timeout=30) as client:
@@ -5293,6 +5317,91 @@ function copyIt(id, btn) {{
         except Exception:
             pass
         return JSONResponse({"ok": True})
+
+    @fapp.patch("/api/events/{event_id}")
+    async def update_event(request: Request, event_id: int):
+        """Generic event field update. Accepts any allowlisted T_EVENTS field;
+        validates Event Status and Other Chiropractor against their enums."""
+        session = _get_session(request)
+        if not session:
+            return JSONResponse({"error": "unauthenticated"}, status_code=401)
+        body = await request.json() or {}
+        patch = {}
+        for k, v in body.items():
+            if k not in _EVENT_PATCH_ALLOWLIST:
+                continue
+            if k == "Event Status":
+                if v and v not in _EVENT_STATUSES:
+                    return JSONResponse({"error": f"invalid status: {v}"}, status_code=400)
+            if k == "Other Chiropractor":
+                if v and v not in _EVENT_OTHER_CHIRO:
+                    return JSONResponse({"error": f"invalid Other Chiropractor: {v}"}, status_code=400)
+            patch[k] = v
+        if not patch:
+            return JSONResponse({"error": "no valid fields"}, status_code=400)
+        env = _env()
+        async with httpx.AsyncClient(timeout=30) as client:
+            r = await client.patch(
+                f"{env['br']}/api/database/rows/table/{T_EVENTS}/{event_id}/?user_field_names=true",
+                headers={"Authorization": f"Token {env['bt']}", "Content-Type": "application/json"},
+                json=patch,
+            )
+            if r.status_code >= 300:
+                return JSONResponse(
+                    {"error": "baserow write failed", "detail": r.text[:400]},
+                    status_code=502,
+                )
+        try:
+            hub_cache.pop(f"table:{T_EVENTS}")
+        except Exception:
+            pass
+        return JSONResponse({"ok": True})
+
+    @fapp.post("/api/events")
+    async def create_event(request: Request):
+        """Create a blank-ish T_EVENTS row for manual intake. Requires Name,
+        Event Type, Event Date. Status defaults to Prospective."""
+        session = _get_session(request)
+        if not session:
+            return JSONResponse({"error": "unauthenticated"}, status_code=401)
+        body = await request.json() or {}
+        name = (body.get("name") or "").strip()
+        ev_type = (body.get("event_type") or "").strip()
+        ev_date = (body.get("event_date") or "").strip()
+        if not name or not ev_type or not ev_date:
+            return JSONResponse(
+                {"error": "name, event_type, event_date required"},
+                status_code=400,
+            )
+        if ev_type not in _EVENT_TYPES:
+            return JSONResponse({"error": f"invalid event_type: {ev_type}"}, status_code=400)
+        import secrets
+        fields = {
+            "Name": name,
+            "Event Type": ev_type,
+            "Event Date": ev_date,
+            "Event Status": "Prospective",
+            "Form Slug": secrets.token_urlsafe(8)[:12],
+            "Created By": session.get("email", ""),
+        }
+        env = _env()
+        async with httpx.AsyncClient(timeout=30) as client:
+            r = await client.post(
+                f"{env['br']}/api/database/rows/table/{T_EVENTS}/?user_field_names=true",
+                headers={"Authorization": f"Token {env['bt']}", "Content-Type": "application/json"},
+                json=fields,
+            )
+            if r.status_code >= 300:
+                return JSONResponse(
+                    {"error": "baserow create failed", "detail": r.text[:400]},
+                    status_code=502,
+                )
+            data = r.json()
+        try:
+            hub_cache.pop(f"table:{T_EVENTS}")
+        except Exception:
+            pass
+        return JSONResponse({"ok": True, "id": data.get("id")})
 
     @fapp.patch("/api/events/{event_id}/checkin")
     async def event_checkin(request: Request, event_id: int):

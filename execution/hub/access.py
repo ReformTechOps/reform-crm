@@ -22,7 +22,7 @@ _staff_cache = {"data": None, "ts": 0}
 
 ALL_HUB_KEYS = ["attorney", "guerilla", "community", "pi_cases", "billing",
                 "communications", "social", "calendar", "tickets",
-                "leads", "tasks", "inbox", "sequences"]
+                "leads", "tasks", "inbox", "sequences", "events"]
 
 
 def _get_staff_record(user: dict) -> dict:

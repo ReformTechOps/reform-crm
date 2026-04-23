@@ -4,7 +4,7 @@ Dashboard pages — login, hub overview, calendar, coming soon placeholders.
 import json
 import os
 
-from .shared import _CSS, _page
+from .shared import _CSS, _page, T_EVENTS
 from .access import _get_allowed_hubs
 from .meetings import meeting_modal_html, meeting_modal_js
 
@@ -177,6 +177,18 @@ def _build_hub_body(allowed: set) -> str:
 
     main_col = f'<div class="db-main"><div>{kpi_bar}{outreach_section}{pi_section}</div>{sidebar}</div>'
 
+    # Upcoming Events widget — 1-month / 2-week / 1-week reminder surface
+    events_section = ''
+    if "events" in allowed:
+        events_section = (
+            '<div style="margin-top:24px">'
+            '<div class="db-sect">Upcoming Events</div>'
+            '<div class="panel" style="margin:0">'
+            '<div class="panel-hd"><span class="panel-title">Next 30 days</span><span class="panel-ct" id="ev-up-ct">—</span></div>'
+            '<div class="panel-body" id="ev-up-body"><div class="loading" style="padding:20px">Loading…</div></div>'
+            '</div></div>'
+        )
+
     # Quick Links — each link keyed to the hub that backs it
     ql_items = []
     if "guerilla" in allowed:
@@ -210,7 +222,7 @@ def _build_hub_body(allowed: set) -> str:
             '</div></div>'
         )
 
-    return _HUB_STYLES + main_col + ql_section + cal_section
+    return _HUB_STYLES + main_col + events_section + ql_section + cal_section
 
 # Shared calendar widget JS — used by both the dashboard (`_hub_page`) and the
 # full `/calendar` page (`_calendar_page`). Expects a `<div id="db-cal-wrap">`
@@ -542,6 +554,50 @@ async function loadActivityCount() {{
   }} catch(e) {{}}
 }}
 loadActivityCount();
+
+async function loadUpcomingEvents() {{
+  if (!ALLOWED.has('events')) return;
+  var body = document.getElementById('ev-up-body');
+  if (!body) return;
+  try {{
+    const rows = await fetchAll({T_EVENTS});
+    const activeStatuses = new Set(['Prospective','Maybe','Approved','Scheduled']);
+    const upcoming = rows
+      .filter(r => activeStatuses.has(sv(r['Event Status'])) && r['Event Date'])
+      .map(r => ({{
+        id: r.id,
+        name: r['Name'] || '(unnamed)',
+        status: sv(r['Event Status']) || 'Prospective',
+        date: r['Event Date'],
+        du: daysUntil(r['Event Date']),
+      }}))
+      .filter(e => e.du !== null && e.du >= 0 && e.du <= 35)
+      .sort((a,b) => a.du - b.du);
+    document.getElementById('ev-up-ct').textContent = upcoming.length + ' upcoming';
+    if (!upcoming.length) {{
+      body.innerHTML = '<div class="empty" style="padding:16px">No events in the next 30 days</div>';
+      return;
+    }}
+    const SC = {{'Prospective':'#475569','Maybe':'#d97706','Approved':'#2563eb','Scheduled':'#ea580c'}};
+    body.innerHTML = upcoming.map(e => {{
+      let band = '#64748b', label = 'soon';
+      if (e.du <= 7)        {{ band = '#ef4444'; label = e.du === 0 ? 'today' : (e.du === 1 ? 'tomorrow' : e.du + 'd'); }}
+      else if (e.du <= 14)  {{ band = '#d97706'; label = e.du + 'd'; }}
+      else if (e.du <= 30)  {{ band = '#3b82f6'; label = e.du + 'd'; }}
+      const c = SC[e.status] || '#475569';
+      const pendingIcon = (e.status === 'Maybe' || e.status === 'Prospective') ? '🤔 ' : '';
+      return `<a href="/events/${{e.id}}" class="a-row" style="text-decoration:none;color:inherit">`
+        + `<div class="dot" style="background:${{band}}"></div>`
+        + `<span class="a-name">${{pendingIcon}}${{esc(e.name)}}</span>`
+        + `<span class="ev-pill" style="background:${{c}}22;color:${{c}};font-size:10px;font-weight:600;padding:2px 7px;border-radius:4px">${{esc(e.status)}}</span>`
+        + `<span class="a-meta" style="color:${{band}};font-weight:600;min-width:60px;text-align:right">${{label}}</span>`
+        + `</a>`;
+    }}).join('');
+  }} catch(err) {{
+    body.innerHTML = '<div class="empty" style="padding:16px">Couldn\\'t load events</div>';
+  }}
+}}
+loadUpcomingEvents();
 
 {cal_js}
 """

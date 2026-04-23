@@ -18,6 +18,7 @@ def _topnav(active: str, user: dict = None) -> str:
         'gorilla_log': 'outreach', 'gorilla_events_int': 'outreach', 'gorilla_events_ext': 'outreach',
         'gorilla_businesses': 'outreach', 'gorilla_boxes': 'outreach', 'gorilla_routes': 'outreach',
         'leads_by_event': 'outreach', 'leads': 'leads', 'lead': 'leads',
+        'events': 'events',
         'patients': 'pi_cases', 'patients_active': 'pi_cases', 'patients_billed': 'pi_cases',
         'patients_awaiting': 'pi_cases', 'patients_closed': 'pi_cases', 'firms': 'pi_cases',
         'billing_collections': 'billing', 'billing_settlements': 'billing',
@@ -167,6 +168,9 @@ def _topnav(active: str, user: dict = None) -> str:
     if 'leads' in hubs:
         leads_cls = ' active' if active in ('leads', 'lead') else ''
         drawer_links += f'<a href="/leads" class="tnav-grp-lbl{leads_cls}">Leads</a>'
+    if 'events' in hubs:
+        events_cls = ' active' if active == 'events' else ''
+        drawer_links += f'<a href="/events" class="tnav-grp-lbl{events_cls}">Events</a>'
     if 'tasks' in hubs:
         tasks_cls = ' active' if active == 'tasks' else ''
         drawer_links += f'<a href="/tasks" class="tnav-grp-lbl{tasks_cls}">Tasks</a>'
@@ -214,6 +218,8 @@ def _topnav(active: str, user: dict = None) -> str:
         nav_items += nav_btn('inbox', 'Inbox', href='/inbox')
     if 'leads' in hubs:
         nav_items += nav_btn('leads', 'Leads', href='/leads')
+    if 'events' in hubs:
+        nav_items += nav_btn('events', 'Events', href='/events')
     if 'tasks' in hubs:
         nav_items += nav_btn('tasks', 'Tasks', href='/tasks')
     if 'sequences' in hubs:

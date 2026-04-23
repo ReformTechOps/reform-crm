@@ -6,6 +6,7 @@ import os
 from .shared import (
     _page, _is_admin,
     T_GOR_VENUES, T_GOR_ACTS, T_GOR_BOXES, T_GOR_ROUTES, T_GOR_ROUTE_STOPS,
+    T_EVENTS,
 )
 from .guerilla import (
     _GFR_CSS, _GFR_HTML, _GFR_FORMS345_HTML, _GFR_FORM2_HTML,
