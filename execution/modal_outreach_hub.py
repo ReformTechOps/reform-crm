@@ -2752,7 +2752,10 @@ def web():
     # Tables the field_rep app (Coolify) mirrors in its Redis cache. When the
     # hub writes to any of these, we POST the TID to field_rep's /api/invalidate
     # so reps see fresh data immediately instead of waiting for TTL to expire.
-    _FIELD_REP_CACHE_TIDS = {T_GOR_VENUES, T_GOR_BOXES, T_GOR_ROUTES, T_GOR_ROUTE_STOPS}
+    _FIELD_REP_CACHE_TIDS = {
+        T_GOR_VENUES, T_GOR_BOXES, T_GOR_ROUTES, T_GOR_ROUTE_STOPS,
+        T_COMPANIES, T_ACTIVITIES,
+    }
 
     async def _notify_field_rep_invalidate(*tids: int) -> None:
         """Fire-and-forget cache-bust to field_rep. Non-fatal on any error."""
@@ -2901,6 +2904,17 @@ def web():
                                                        route_id, _hub_cached_rows)
         _invalidate(T_GOR_ROUTES, T_GOR_ROUTE_STOPS)
         return resp
+
+    # ── Outreach: overdue follow-ups across categories ────────────────────────
+    @fapp.get("/api/outreach/due")
+    async def outreach_due(request: Request):
+        session = _get_session(request)
+        if not session:
+            return JSONResponse({"error": "unauthenticated"}, status_code=401)
+        from hub import outreach_api
+        env = _env()
+        return await outreach_api.get_outreach_due(env["br"], env["bt"], session,
+                                                   _hub_cached_rows)
 
     # ── Social Poster Hub ──────────────────────────────────────────────────────
     @fapp.get("/social/inbox", response_class=HTMLResponse)

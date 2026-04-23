@@ -23,6 +23,7 @@ from hub.mobile import (
     _mobile_home_page,
     _mobile_lead_capture_page,
     _mobile_map_page,
+    _mobile_outreach_due_page,
     _mobile_recent_page,
     _mobile_route_page,
     _mobile_routes_dashboard_page,
@@ -81,6 +82,14 @@ async def recent(request: Request):
     if not user:
         return RedirectResponse(url="/login")
     return HTMLResponse(_mobile_recent_page(br, bt, user=user))
+
+
+@router.get("/outreach", response_class=HTMLResponse)
+async def outreach_due_page(request: Request):
+    user, br, bt = await _guard(request)
+    if not user:
+        return RedirectResponse(url="/login")
+    return HTMLResponse(_mobile_outreach_due_page(br, bt, user=user))
 
 
 @router.get("/map", response_class=HTMLResponse)

@@ -41,7 +41,11 @@ def _mobile_home_page(br: str, bt: str, user: dict = None) -> str:
         '<span class="mobile-cta-icon">\U0001f5fa\ufe0f</span>'
         '<div><div>My Routes</div><div class="mobile-cta-sub">View all assigned routes</div></div>'
         '</a>'
-        + ('<a href="/map" class="mobile-cta mobile-cta-blue">'
+        '<a href="/outreach" class="mobile-cta mobile-cta-blue">'
+        '<span class="mobile-cta-icon">\U0001f4de</span>'
+        '<div><div>Outreach Due</div><div class="mobile-cta-sub">Overdue follow-ups</div></div>'
+        '</a>'
+        + ('<a href="/map" class="mobile-cta mobile-cta-green">'
            '<span class="mobile-cta-icon">\U0001f4cd</span>'
            '<div><div>Route Planner</div><div class="mobile-cta-sub">Full venue map</div></div>'
            '</a>' if _is_admin(user) else '')
@@ -274,6 +278,147 @@ function togglePast() {{
 load();
 """
     return _mobile_page('m_routes', 'My Routes', body, js, br, bt, user=user)
+
+
+def _mobile_outreach_due_page(br: str, bt: str, user: dict = None) -> str:
+    """Cross-category list of companies with past-due Follow-Up Dates.
+    Fetches `/api/outreach/due` (server-filtered). Each row shows name,
+    category pill, phone (tel:), days overdue. Tap a row → Company detail
+    page (shipped in a later iteration)."""
+    user = user or {}
+    body = (
+        '<div class="mobile-hdr">'
+        '<div><div class="mobile-hdr-title">Outreach Due</div>'
+        '<div class="mobile-hdr-sub">Companies past their follow-up date</div></div>'
+        '<div style="display:flex;align-items:center;gap:10px">'
+        '<button class="m-theme-btn" onclick="mToggleTheme()" id="m-theme-btn"><span id="m-theme-icon">\U0001f319</span></button>'
+        '<a href="/" style="font-size:12px;color:var(--text3);text-decoration:none">← Home</a>'
+        '</div>'
+        '</div>'
+        '<div class="mobile-body">'
+        '<div id="od-filter" style="display:flex;gap:6px;margin-bottom:12px;flex-wrap:wrap"></div>'
+        '<div id="od-summary" style="font-size:12px;color:var(--text3);margin-bottom:10px">Loading…</div>'
+        '<div id="od-list"><div class="loading">Loading…</div></div>'
+        '</div>'
+    )
+    js = """
+var _OD_ROWS = [];
+var _OD_FILTER = 'all';  // 'all' | 'attorney' | 'guerilla' | 'community' | 'other'
+
+var CAT_META = {
+  attorney:  {label: 'Attorney',  color: '#7c3aed', icon: '⚖'},
+  guerilla:  {label: 'Guerilla',  color: '#ea580c', icon: '\U0001f3cb'},
+  community: {label: 'Community', color: '#059669', icon: '\U0001f91d'},
+  other:     {label: 'Other',     color: '#64748b', icon: '\U0001f4cd'},
+};
+
+function esc(s) {
+  return String(s == null ? '' : s)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+
+function overdueColor(days) {
+  if (days >= 30) return '#dc2626';
+  if (days >= 14) return '#ea580c';
+  if (days >= 7)  return '#d97706';
+  return '#64748b';
+}
+
+function renderFilter() {
+  var counts = {all: _OD_ROWS.length, attorney: 0, guerilla: 0, community: 0, other: 0};
+  _OD_ROWS.forEach(function(r) {
+    var c = r.category in counts ? r.category : 'other';
+    counts[c] = (counts[c] || 0) + 1;
+  });
+  var cats = ['all', 'attorney', 'guerilla', 'community', 'other'];
+  var html = '';
+  cats.forEach(function(k) {
+    if (k !== 'all' && !counts[k]) return;
+    var active = k === _OD_FILTER;
+    var meta = k === 'all' ? {label: 'All', color: '#0f172a'} : CAT_META[k];
+    html +=
+      '<button onclick="setFilter(\\'' + k + '\\')" ' +
+      'style="padding:6px 12px;border-radius:16px;font-size:12px;font-weight:600;cursor:pointer;font-family:inherit;' +
+      'border:1px solid ' + (active ? meta.color : 'var(--border)') + ';' +
+      'background:' + (active ? meta.color : 'var(--card)') + ';' +
+      'color:' + (active ? '#fff' : 'var(--text2)') + '">' +
+      esc(meta.label) + ' ' + counts[k] + '</button>';
+  });
+  document.getElementById('od-filter').innerHTML = html;
+}
+
+function setFilter(k) {
+  _OD_FILTER = k;
+  renderFilter();
+  renderList();
+}
+
+function renderList() {
+  var list = _OD_FILTER === 'all'
+    ? _OD_ROWS
+    : _OD_ROWS.filter(function(r) { return (r.category || 'other') === _OD_FILTER; });
+
+  document.getElementById('od-summary').textContent =
+    list.length === 0 ? 'No overdue follow-ups in this filter.' :
+    (list.length + ' compan' + (list.length === 1 ? 'y' : 'ies') + ' overdue');
+
+  if (!list.length) {
+    document.getElementById('od-list').innerHTML =
+      '<div style="text-align:center;padding:40px 16px;color:var(--text3);font-size:13px">' +
+      '\U0001f389 No overdue follow-ups.</div>';
+    return;
+  }
+
+  var html = '';
+  list.forEach(function(r) {
+    var meta = CAT_META[r.category] || CAT_META.other;
+    var color = overdueColor(r.days_overdue);
+    var label = r.days_overdue === 0 ? 'Today' :
+                r.days_overdue === 1 ? '1d overdue' :
+                r.days_overdue + 'd overdue';
+    html +=
+      '<div style="background:var(--card);border:1px solid var(--border);border-left:3px solid ' + color +
+      ';border-radius:10px;padding:12px 14px;margin-bottom:8px">' +
+      '<div style="display:flex;align-items:flex-start;justify-content:space-between;gap:8px;margin-bottom:6px">' +
+      '<div style="flex:1;min-width:0">' +
+      '<div style="font-size:14px;font-weight:700;color:var(--text);word-break:break-word">' + esc(r.name) + '</div>' +
+      (r.address ? '<div style="font-size:11px;color:var(--text3);margin-top:2px">' + esc(r.address) + '</div>' : '') +
+      '</div>' +
+      '<span style="background:' + meta.color + '22;color:' + meta.color + ';font-size:10px;' +
+      'font-weight:600;padding:2px 8px;border-radius:10px;white-space:nowrap">' + esc(meta.label) + '</span>' +
+      '</div>' +
+      '<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-top:6px">' +
+      '<span style="font-size:11px;font-weight:600;color:' + color + '">' + esc(label) + '</span>' +
+      (r.phone
+        ? '<a href="tel:' + esc(r.phone) + '" style="font-size:12px;color:#3b82f6;font-weight:600;text-decoration:none">' +
+          '\U0001f4de ' + esc(r.phone) + '</a>'
+        : '<span style="font-size:11px;color:var(--text3)">no phone</span>') +
+      '</div>' +
+      '</div>';
+  });
+  document.getElementById('od-list').innerHTML = html;
+}
+
+async function loadOD() {
+  try {
+    var r = await fetch('/api/outreach/due');
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    _OD_ROWS = await r.json();
+  } catch (e) {
+    document.getElementById('od-summary').textContent = '';
+    document.getElementById('od-list').innerHTML =
+      '<div style="text-align:center;padding:40px 16px;color:#ef4444;font-size:13px">' +
+      'Failed to load: ' + esc(e.message || 'unknown') + '</div>';
+    return;
+  }
+  renderFilter();
+  renderList();
+}
+
+loadOD();
+"""
+    return _mobile_page('m_home', 'Outreach Due', body, js, br, bt, user=user)
 
 
 def _mobile_lead_capture_page(br: str, bt: str, user: dict = None) -> str:

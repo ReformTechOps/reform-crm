@@ -136,6 +136,17 @@ async def guerilla_log(request: Request):
     return resp
 
 
+# ─── Outreach: overdue follow-ups across categories ─────────────────────────
+@router.get("/api/outreach/due")
+async def outreach_due(request: Request):
+    session = await get_session(request)
+    if not session:
+        return JSONResponse({"error": "unauthenticated"}, status_code=401)
+    from hub import outreach_api
+    br, bt = _env()
+    return await outreach_api.get_outreach_due(br, bt, session, _cached_rows)
+
+
 # ─── Lead capture (field-rep form) ───────────────────────────────────────────
 # Field reps submit the Capture Lead form to this endpoint. Creates a T_LEADS
 # row; on success, the mobile UI closes the form. The hub has an analogous

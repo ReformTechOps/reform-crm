@@ -12,8 +12,8 @@ import asyncio
 import os
 
 from hub.constants import (
-    T_EVENTS, T_GOR_ACTS, T_GOR_BOXES, T_GOR_ROUTES, T_GOR_ROUTE_STOPS,
-    T_GOR_VENUES, T_STAFF,
+    T_ACTIVITIES, T_COMPANIES, T_EVENTS, T_GOR_ACTS, T_GOR_BOXES,
+    T_GOR_ROUTES, T_GOR_ROUTE_STOPS, T_GOR_VENUES, T_STAFF,
 )
 
 from . import storage
@@ -24,6 +24,7 @@ _WARM_PERIOD = 90  # seconds
 _WARM_TABLES = [
     T_GOR_ROUTES, T_GOR_ROUTE_STOPS, T_GOR_ACTS,
     T_GOR_VENUES, T_GOR_BOXES, T_EVENTS, T_STAFF,
+    T_COMPANIES, T_ACTIVITIES,
 ]
 
 
