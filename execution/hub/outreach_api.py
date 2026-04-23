@@ -56,6 +56,114 @@ def _excluded_status(company: dict) -> bool:
     return False
 
 
+from datetime import datetime as _dt, timezone as _tz
+
+
+def _iso_now() -> str:
+    return _dt.now(_tz.utc).isoformat()
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# GET /api/companies/{id} — fetch one company row by id
+# ─────────────────────────────────────────────────────────────────────────────
+async def get_company(br: str, bt: str, company_id: int) -> JSONResponse:
+    import httpx
+    async with httpx.AsyncClient(timeout=15) as client:
+        r = await client.get(
+            f"{br}/api/database/rows/table/{T_COMPANIES}/{company_id}/?user_field_names=true",
+            headers={"Authorization": f"Token {bt}"},
+        )
+    if r.status_code == 404:
+        return JSONResponse({"error": "not found"}, status_code=404)
+    if r.status_code != 200:
+        return JSONResponse({"error": r.text[:300]}, status_code=r.status_code)
+    return JSONResponse(r.json())
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# GET /api/companies/{id}/activities — list activities for a company
+# ─────────────────────────────────────────────────────────────────────────────
+async def get_company_activities(br: str, bt: str, company_id: int,
+                                  cached_rows: CachedRowsFn) -> JSONResponse:
+    if not T_ACTIVITIES:
+        return JSONResponse([])
+    rows = await cached_rows(T_ACTIVITIES)
+
+    def _links(v):
+        return [x.get("id") if isinstance(x, dict) else x for x in (v or [])]
+
+    matched = [r for r in rows or [] if company_id in _links(r.get("Company"))]
+    matched.sort(key=lambda a: (a.get("Created") or a.get("Date") or ""), reverse=True)
+    return JSONResponse(matched)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# POST /api/companies/{id}/activities — log a new activity on a company
+# ─────────────────────────────────────────────────────────────────────────────
+async def create_company_activity(
+    request, br: str, bt: str, user: dict, company_id: int,
+    invalidate=None,
+) -> JSONResponse:
+    """Body: {summary, kind, type, outcome, person, follow_up, date, contact_id}.
+    `kind` defaults to 'user_activity'. `summary` is required."""
+    import httpx
+    if not T_ACTIVITIES:
+        return JSONResponse({"error": "activities not configured"}, status_code=503)
+    body = await request.json()
+    summary = (body.get("summary") or "").strip()
+    if not summary:
+        return JSONResponse({"error": "summary required"}, status_code=400)
+    payload = {
+        "Summary":        summary,
+        "Kind":           body.get("kind") or "user_activity",
+        "Type":           body.get("type") or None,
+        "Outcome":        body.get("outcome") or None,
+        "Contact Person": body.get("person") or "",
+        "Follow-Up Date": body.get("follow_up") or None,
+        "Date":           body.get("date") or _iso_now()[:10],
+        "Author":         user.get("email", ""),
+        "Created":        _iso_now(),
+        "Company":        [company_id],
+    }
+    if body.get("contact_id"):
+        try: payload["Contact"] = [int(body["contact_id"])]
+        except Exception: pass
+    clean = {k: v for k, v in payload.items() if v not in (None, "")}
+    async with httpx.AsyncClient(timeout=20) as client:
+        r = await client.post(
+            f"{br}/api/database/rows/table/{T_ACTIVITIES}/?user_field_names=true",
+            headers={"Authorization": f"Token {bt}", "Content-Type": "application/json"},
+            json=clean,
+        )
+    if r.status_code not in (200, 201):
+        return JSONResponse({"error": r.text[:300]}, status_code=r.status_code)
+    # Also patch the parent Company so Follow-Up Date + Contact Status reflect
+    # the latest activity. Field reps rely on the Outreach Due dashboard
+    # computed from Company.Follow-Up Date, so NOT patching here would leave
+    # the company "overdue" even after a fresh check-in.
+    patch: dict = {}
+    if body.get("follow_up"):
+        patch["Follow-Up Date"] = body["follow_up"]
+    new_status = (body.get("new_status") or "").strip()
+    if new_status:
+        patch["Contact Status"] = new_status
+    if patch:
+        patch["Updated"] = _iso_now()
+        async with httpx.AsyncClient(timeout=15) as client:
+            try:
+                await client.patch(
+                    f"{br}/api/database/rows/table/{T_COMPANIES}/{company_id}/?user_field_names=true",
+                    headers={"Authorization": f"Token {bt}", "Content-Type": "application/json"},
+                    json=patch,
+                )
+            except Exception:
+                pass
+    if invalidate is not None:
+        try: await invalidate(T_ACTIVITIES, T_COMPANIES)
+        except Exception: pass
+    return JSONResponse(r.json())
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # GET /api/outreach/due — all companies with Follow-Up Date < today
 # ─────────────────────────────────────────────────────────────────────────────

@@ -54,7 +54,9 @@ def _mobile_home_page(br: str, bt: str, user: dict = None) -> str:
         '<div class="mobile-links">'
         '<a href="/lead" class="mobile-link">\U0001f4cb Capture Lead</a>'
         '<a href="/recent" class="mobile-link">\u23f1\ufe0f Recent Logs</a>'
-        + ('<a href="/map" class="mobile-link">\U0001f4cd Full Map</a>' if _is_admin(user) else '')
+        '<a href="/directory" class="mobile-link">\U0001f4c7 All Companies</a>'
+        '<a href="/outreach/map" class="mobile-link">\U0001f5fa\ufe0f Outreach Map</a>'
+        + ('<a href="/map" class="mobile-link">\U0001f4cd Full Venue Map</a>' if _is_admin(user) else '')
         + '<a href="https://hub.reformchiropractic.app" class="mobile-link">\U0001f4bb Full Hub</a>'
         '</div>'
         '</div>'
@@ -378,8 +380,9 @@ function renderList() {
                 r.days_overdue === 1 ? '1d overdue' :
                 r.days_overdue + 'd overdue';
     html +=
-      '<div style="background:var(--card);border:1px solid var(--border);border-left:3px solid ' + color +
-      ';border-radius:10px;padding:12px 14px;margin-bottom:8px">' +
+      '<div onclick="location.href=\\'/company/' + r.id + '\\'" ' +
+      'style="background:var(--card);border:1px solid var(--border);border-left:3px solid ' + color +
+      ';border-radius:10px;padding:12px 14px;margin-bottom:8px;cursor:pointer">' +
       '<div style="display:flex;align-items:flex-start;justify-content:space-between;gap:8px;margin-bottom:6px">' +
       '<div style="flex:1;min-width:0">' +
       '<div style="font-size:14px;font-weight:700;color:var(--text);word-break:break-word">' + esc(r.name) + '</div>' +
@@ -391,7 +394,7 @@ function renderList() {
       '<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-top:6px">' +
       '<span style="font-size:11px;font-weight:600;color:' + color + '">' + esc(label) + '</span>' +
       (r.phone
-        ? '<a href="tel:' + esc(r.phone) + '" style="font-size:12px;color:#3b82f6;font-weight:600;text-decoration:none">' +
+        ? '<a href="tel:' + esc(r.phone) + '" onclick="event.stopPropagation()" style="font-size:12px;color:#3b82f6;font-weight:600;text-decoration:none">' +
           '\U0001f4de ' + esc(r.phone) + '</a>'
         : '<span style="font-size:11px;color:var(--text3)">no phone</span>') +
       '</div>' +
@@ -419,6 +422,539 @@ async function loadOD() {
 loadOD();
 """
     return _mobile_page('m_home', 'Outreach Due', body, js, br, bt, user=user)
+
+
+def _mobile_outreach_map_page(br: str, bt: str, user: dict = None) -> str:
+    """Full-screen Google Map plotting overdue-follow-up companies near the
+    rep's current location. Tap a pin → InfoWindow → "Details" link opens
+    the mobile company detail page."""
+    import os as _os
+    gk = _os.environ.get("GOOGLE_MAPS_API_KEY", "")
+    user = user or {}
+    body = (
+        '<div class="mobile-hdr">'
+        '<div><div class="mobile-hdr-title">Outreach Map</div>'
+        '<div class="mobile-hdr-sub">Overdue follow-ups near you</div></div>'
+        '<div style="display:flex;align-items:center;gap:10px">'
+        '<button class="m-theme-btn" onclick="mToggleTheme()" id="m-theme-btn"><span id="m-theme-icon">\U0001f319</span></button>'
+        '<a href="/outreach" style="font-size:12px;color:var(--text3);text-decoration:none">← List</a>'
+        '</div>'
+        '</div>'
+        '<div id="om-map" style="height:calc(100vh - 120px);width:100%;background:var(--bg2)"></div>'
+        '<div id="om-msg" style="text-align:center;padding:8px;font-size:12px;color:var(--text3);min-height:14px"></div>'
+    )
+    js = f"""
+const GK = {repr(gk)};
+const OFFICE = {{lat: 33.9478, lng: -118.1335}};  // Downey
+let _OM_MAP = null;
+let _OM_ROWS = [];
+let _OM_MARKERS = [];
+
+var CAT_COLOR = {{
+  attorney: '#7c3aed',
+  guerilla: '#ea580c',
+  community: '#059669',
+  other: '#64748b',
+}};
+
+function esc(s) {{
+  return String(s == null ? '' : s)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}}
+
+async function loadOM() {{
+  try {{
+    var r = await fetch('/api/outreach/due');
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    _OM_ROWS = await r.json();
+  }} catch (e) {{
+    document.getElementById('om-msg').textContent = 'Failed to load: ' + (e.message || 'unknown');
+    return;
+  }}
+  if (!GK) {{
+    document.getElementById('om-msg').textContent = 'Maps API key not configured.';
+    return;
+  }}
+  // Lazy-load Maps JS
+  if (window.google && window.google.maps) {{
+    _omReady();
+  }} else {{
+    window._omReady = _omReady;
+    var s = document.createElement('script');
+    s.src = 'https://maps.googleapis.com/maps/api/js?key=' + GK + '&callback=_omReady';
+    s.async = true;
+    document.head.appendChild(s);
+  }}
+}}
+
+function _omReady() {{
+  var center = OFFICE;
+  _OM_MAP = new google.maps.Map(document.getElementById('om-map'), {{
+    center: center,
+    zoom: 11,
+    mapTypeControl: false,
+    streetViewControl: false,
+    fullscreenControl: false,
+  }});
+  plotRows();
+  // Try to center on rep's live location — non-blocking.
+  if (navigator.geolocation) {{
+    navigator.geolocation.getCurrentPosition(function(pos) {{
+      var here = {{lat: pos.coords.latitude, lng: pos.coords.longitude}};
+      _OM_MAP.panTo(here);
+      _OM_MAP.setZoom(13);
+      new google.maps.Marker({{
+        position: here, map: _OM_MAP,
+        icon: {{
+          path: google.maps.SymbolPath.CIRCLE,
+          scale: 8, fillColor: '#3b82f6', fillOpacity: 1,
+          strokeColor: '#fff', strokeWeight: 2,
+        }},
+        title: 'You are here',
+      }});
+    }}, function() {{}}, {{timeout: 5000}});
+  }}
+}}
+
+function plotRows() {{
+  _OM_MARKERS.forEach(function(m) {{ m.setMap(null); }});
+  _OM_MARKERS = [];
+  var bounds = new google.maps.LatLngBounds();
+  var plotted = 0;
+  _OM_ROWS.forEach(function(r) {{
+    var lat = parseFloat(r.latitude); var lng = parseFloat(r.longitude);
+    if (!lat || !lng || isNaN(lat) || isNaN(lng)) return;
+    var color = CAT_COLOR[r.category] || CAT_COLOR.other;
+    var marker = new google.maps.Marker({{
+      position: {{lat: lat, lng: lng}},
+      map: _OM_MAP,
+      icon: {{
+        path: google.maps.SymbolPath.BACKWARD_CLOSED_ARROW,
+        scale: 5, fillColor: color, fillOpacity: 0.95,
+        strokeColor: '#fff', strokeWeight: 1.5,
+      }},
+      title: r.name,
+    }});
+    var iw = new google.maps.InfoWindow({{
+      content: '<div style="font-family:system-ui;max-width:200px">' +
+               '<div style="font-weight:700;font-size:13px;margin-bottom:4px">' + esc(r.name) + '</div>' +
+               '<div style="font-size:11px;color:#64748b;margin-bottom:6px">' + r.days_overdue + 'd overdue</div>' +
+               (r.phone ? '<a href="tel:' + esc(r.phone) + '" style="font-size:12px;color:#3b82f6;text-decoration:none;display:block;margin-bottom:3px">\U0001f4de ' + esc(r.phone) + '</a>' : '') +
+               '<a href="/company/' + r.id + '" style="font-size:12px;color:#ea580c;font-weight:600;text-decoration:none">View details →</a>' +
+               '</div>',
+    }});
+    marker.addListener('click', function() {{ iw.open(_OM_MAP, marker); }});
+    _OM_MARKERS.push(marker);
+    bounds.extend(marker.getPosition());
+    plotted++;
+  }});
+  document.getElementById('om-msg').textContent =
+    plotted + ' pin' + (plotted === 1 ? '' : 's') + ' (of ' + _OM_ROWS.length + ' overdue companies) have coordinates';
+  if (plotted > 0) {{
+    _OM_MAP.fitBounds(bounds, 40);
+    if (_OM_MAP.getZoom() > 14) _OM_MAP.setZoom(14);
+  }}
+}}
+
+loadOM();
+"""
+    return _mobile_page('m_home', 'Outreach Map', body, js, br, bt, user=user)
+
+
+def _mobile_company_detail_page(br: str, bt: str, company_id: int,
+                                 user: dict = None) -> str:
+    """Mobile-sized view of a single Company row + its activity feed, with an
+    inline 'Log activity' form. POSTs to /api/companies/{id}/activities."""
+    user = user or {}
+    body = (
+        '<div class="mobile-hdr">'
+        '<div style="flex:1;min-width:0"><div class="mobile-hdr-title" id="cd-name">Loading…</div>'
+        '<div class="mobile-hdr-sub" id="cd-sub"></div></div>'
+        '<div style="display:flex;align-items:center;gap:10px">'
+        '<button class="m-theme-btn" onclick="mToggleTheme()" id="m-theme-btn"><span id="m-theme-icon">\U0001f319</span></button>'
+        '<a href="javascript:history.back()" style="font-size:12px;color:var(--text3);text-decoration:none">← Back</a>'
+        '</div>'
+        '</div>'
+        '<div class="mobile-body">'
+        '<div id="cd-meta" style="margin-bottom:14px"></div>'
+        # Quick-log activity button
+        '<button onclick="openLogModal()" '
+        'style="width:100%;padding:12px;background:#ea580c;color:#fff;border:none;border-radius:10px;'
+        'font-size:14px;font-weight:700;cursor:pointer;font-family:inherit;margin-bottom:16px">'
+        '+ Log activity</button>'
+        # Activity feed
+        '<div class="mobile-section-lbl">Recent activity</div>'
+        '<div id="cd-feed"><div class="loading">Loading…</div></div>'
+        '</div>'
+        # Log-activity modal
+        '<div id="cd-modal-bg" onclick="if(event.target===this)closeLogModal()" '
+        'style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.6);z-index:900;'
+        'align-items:flex-start;justify-content:center;padding:40px 16px;overflow-y:auto">'
+        '<div style="background:var(--bg2);border:1px solid var(--border);border-radius:14px;'
+        'width:100%;max-width:480px;padding:20px">'
+        '<h3 style="margin:0 0 14px;color:var(--text);font-size:16px">Log activity</h3>'
+        '<label style="display:block;font-size:11px;font-weight:700;color:var(--text3);'
+        'text-transform:uppercase;margin-bottom:4px;letter-spacing:.4px">Type</label>'
+        '<select id="cd-type" style="width:100%;padding:9px;background:var(--bg);border:1px solid var(--border);'
+        'color:var(--text);border-radius:6px;font-size:13px;margin-bottom:12px">'
+        '<option value="Call">\U0001f4de Call</option>'
+        '<option value="Email">✉️ Email</option>'
+        '<option value="Drop Off">\U0001f4cd Drop-off</option>'
+        '<option value="Text">\U0001f4ac Text</option>'
+        '<option value="In Person">\U0001f91d In Person</option>'
+        '<option value="Other">Other</option>'
+        '</select>'
+        '<label style="display:block;font-size:11px;font-weight:700;color:var(--text3);'
+        'text-transform:uppercase;margin-bottom:4px;letter-spacing:.4px">Notes *</label>'
+        '<textarea id="cd-summary" rows="3" placeholder="What happened?" '
+        'style="width:100%;padding:9px;background:var(--bg);border:1px solid var(--border);'
+        'color:var(--text);border-radius:6px;font-size:13px;resize:vertical;font-family:inherit;margin-bottom:12px"></textarea>'
+        '<label style="display:block;font-size:11px;font-weight:700;color:var(--text3);'
+        'text-transform:uppercase;margin-bottom:4px;letter-spacing:.4px">Next follow-up</label>'
+        '<input type="date" id="cd-fu" '
+        'style="width:100%;padding:9px;background:var(--bg);border:1px solid var(--border);'
+        'color:var(--text);border-radius:6px;font-size:13px;margin-bottom:12px;font-family:inherit">'
+        '<label style="display:block;font-size:11px;font-weight:700;color:var(--text3);'
+        'text-transform:uppercase;margin-bottom:4px;letter-spacing:.4px">New status (optional)</label>'
+        '<select id="cd-status" style="width:100%;padding:9px;background:var(--bg);border:1px solid var(--border);'
+        'color:var(--text);border-radius:6px;font-size:13px;margin-bottom:14px">'
+        '<option value="">(keep current)</option>'
+        '<option value="Not Contacted">Not Contacted</option>'
+        '<option value="Contacted">Contacted</option>'
+        '<option value="In Discussion">In Discussion</option>'
+        '<option value="Active Partner">Active Partner</option>'
+        '</select>'
+        '<div id="cd-modal-msg" style="font-size:12px;min-height:14px;margin-bottom:8px"></div>'
+        '<div style="display:flex;gap:8px;justify-content:flex-end">'
+        '<button onclick="closeLogModal()" '
+        'style="padding:9px 16px;background:none;border:1px solid var(--border);color:var(--text2);'
+        'border-radius:6px;font-size:13px;cursor:pointer;font-family:inherit">Cancel</button>'
+        '<button id="cd-modal-send" onclick="submitLog()" '
+        'style="padding:9px 20px;background:#059669;border:none;color:#fff;border-radius:6px;'
+        'font-size:13px;font-weight:700;cursor:pointer;font-family:inherit">Save</button>'
+        '</div>'
+        '</div>'
+        '</div>'
+    )
+    js = f"""
+const COMPANY_ID = {int(company_id)};
+let _COMPANY = null;
+
+var CAT_META = {{
+  attorney:  {{label: 'Attorney',  color: '#7c3aed'}},
+  guerilla:  {{label: 'Guerilla',  color: '#ea580c'}},
+  community: {{label: 'Community', color: '#059669'}},
+  other:     {{label: 'Other',     color: '#64748b'}},
+}};
+
+function esc(s) {{
+  return String(s == null ? '' : s)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}}
+
+function svJS(v) {{
+  if (!v) return '';
+  if (typeof v === 'object' && !Array.isArray(v)) return v.value || '';
+  if (Array.isArray(v) && v.length) return (v[0] && v[0].value) || (v[0] && v[0].name) || String(v[0]);
+  return String(v);
+}}
+
+function fmtDate(s) {{
+  if (!s) return '—';
+  s = String(s).slice(0, 10);
+  var parts = s.split('-');
+  if (parts.length !== 3) return s;
+  return parts[1] + '/' + parts[2] + '/' + parts[0].slice(2);
+}}
+
+function renderCompany() {{
+  var c = _COMPANY;
+  var name = c.Name || '(unnamed)';
+  var cat = (svJS(c.Category) || 'other').toLowerCase();
+  var meta = CAT_META[cat] || CAT_META.other;
+  document.title = name + ' — Reform';
+  document.getElementById('cd-name').textContent = name;
+  document.getElementById('cd-sub').innerHTML =
+    '<span style="background:' + meta.color + '22;color:' + meta.color + ';font-size:10px;font-weight:600;padding:2px 8px;border-radius:10px">' +
+    esc(meta.label) + '</span>' +
+    (svJS(c['Contact Status']) ? '<span style="font-size:11px;color:var(--text3);margin-left:8px">' + esc(svJS(c['Contact Status'])) + '</span>' : '');
+
+  var phone = c.Phone || '';
+  var email = c.Email || '';
+  var addr  = c.Address || '';
+  var site  = c.Website || '';
+  var fu    = c['Follow-Up Date'] || '';
+  var notes = c.Notes || '';
+
+  var mapsUrl = addr ? 'https://www.google.com/maps/search/?api=1&query=' + encodeURIComponent(addr) : '';
+  var html = '<div style="background:var(--card);border:1px solid var(--border);border-radius:10px;padding:14px">';
+  if (phone) html += '<div style="padding:6px 0;border-bottom:1px solid var(--border)"><a href="tel:' + esc(phone) + '" style="color:#3b82f6;text-decoration:none;font-size:14px;font-weight:600">\U0001f4de ' + esc(phone) + '</a></div>';
+  if (email) html += '<div style="padding:6px 0;border-bottom:1px solid var(--border)"><a href="mailto:' + esc(email) + '" style="color:#3b82f6;text-decoration:none;font-size:14px;font-weight:600">✉️ ' + esc(email) + '</a></div>';
+  if (addr)  html += '<div style="padding:6px 0;border-bottom:1px solid var(--border);font-size:13px;color:var(--text2)">\U0001f4cd ' + esc(addr) + ' <a href="' + esc(mapsUrl) + '" target="_blank" style="color:#3b82f6;font-size:12px;margin-left:6px">Navigate →</a></div>';
+  if (site)  html += '<div style="padding:6px 0;border-bottom:1px solid var(--border)"><a href="' + esc(site) + '" target="_blank" style="color:#3b82f6;text-decoration:none;font-size:13px">\U0001f310 ' + esc(site) + '</a></div>';
+  if (fu)    html += '<div style="padding:6px 0;font-size:13px;color:var(--text2)">\U0001f4c5 Next follow-up: <strong>' + esc(fmtDate(fu)) + '</strong></div>';
+  if (notes) html += '<div style="padding:10px 0 0;margin-top:8px;border-top:1px solid var(--border);font-size:12px;color:var(--text3);white-space:pre-wrap">' + esc(notes) + '</div>';
+  html += '</div>';
+  document.getElementById('cd-meta').innerHTML = html;
+}}
+
+function renderFeed(activities) {{
+  if (!activities || !activities.length) {{
+    document.getElementById('cd-feed').innerHTML =
+      '<div style="text-align:center;padding:24px 0;color:var(--text3);font-size:13px">No activity yet.</div>';
+    return;
+  }}
+  var html = '';
+  activities.forEach(function(a) {{
+    var kind  = svJS(a.Kind) || 'activity';
+    var type  = svJS(a.Type) || '';
+    var summ  = a.Summary || '';
+    var when  = a.Created || a.Date || '';
+    var who   = a.Author || '';
+    var typeColor = '#475569';
+    html +=
+      '<div style="background:var(--card);border:1px solid var(--border);border-radius:8px;padding:10px 12px;margin-bottom:6px">' +
+      '<div style="display:flex;gap:8px;align-items:center;margin-bottom:4px">' +
+      (type ? '<span style="background:' + typeColor + '20;color:' + typeColor + ';font-size:10px;font-weight:600;padding:2px 7px;border-radius:6px">' + esc(type) + '</span>' : '') +
+      '<span style="font-size:10px;color:var(--text3)">' + esc(fmtDate(when)) + (who ? ' · ' + esc(who.split('@')[0]) : '') + '</span>' +
+      '</div>' +
+      '<div style="font-size:13px;color:var(--text2);white-space:pre-wrap">' + esc(summ) + '</div>' +
+      '</div>';
+  }});
+  document.getElementById('cd-feed').innerHTML = html;
+}}
+
+async function load() {{
+  var [cRes, aRes] = await Promise.all([
+    fetch('/api/companies/' + COMPANY_ID),
+    fetch('/api/companies/' + COMPANY_ID + '/activities'),
+  ]);
+  if (!cRes.ok) {{
+    document.getElementById('cd-name').textContent = 'Not found';
+    document.getElementById('cd-meta').innerHTML = '';
+    document.getElementById('cd-feed').innerHTML = '';
+    return;
+  }}
+  _COMPANY = await cRes.json();
+  renderCompany();
+  if (aRes.ok) {{
+    var acts = await aRes.json();
+    renderFeed(acts);
+  }}
+}}
+
+// ── Log activity modal ──
+function openLogModal() {{
+  document.getElementById('cd-summary').value = '';
+  document.getElementById('cd-fu').value = '';
+  document.getElementById('cd-type').value = 'Call';
+  document.getElementById('cd-status').value = '';
+  document.getElementById('cd-modal-msg').textContent = '';
+  document.getElementById('cd-modal-bg').style.display = 'flex';
+}}
+
+function closeLogModal() {{
+  document.getElementById('cd-modal-bg').style.display = 'none';
+}}
+
+async function submitLog() {{
+  var summary = document.getElementById('cd-summary').value.trim();
+  var type    = document.getElementById('cd-type').value;
+  var fu      = document.getElementById('cd-fu').value;
+  var status  = document.getElementById('cd-status').value;
+  var msg     = document.getElementById('cd-modal-msg');
+  var btn     = document.getElementById('cd-modal-send');
+  if (!summary) {{
+    msg.style.color = '#ef4444';
+    msg.textContent = 'Notes are required.';
+    return;
+  }}
+  btn.disabled = true;
+  btn.textContent = 'Saving…';
+  msg.textContent = '';
+  var body = {{ summary: summary, type: type, kind: 'user_activity' }};
+  if (fu) body.follow_up = fu;
+  if (status) body.new_status = status;
+  var r = await fetch('/api/companies/' + COMPANY_ID + '/activities', {{
+    method: 'POST', headers: {{ 'Content-Type': 'application/json' }},
+    body: JSON.stringify(body),
+  }});
+  if (r.ok) {{
+    closeLogModal();
+    await load();  // re-render with new activity
+  }} else {{
+    var err = '';
+    try {{ err = (await r.json()).error || ''; }} catch(e) {{}}
+    msg.style.color = '#ef4444';
+    msg.textContent = 'Save failed: ' + (err || ('HTTP ' + r.status));
+    btn.disabled = false;
+    btn.textContent = 'Save';
+  }}
+}}
+
+load();
+"""
+    return _mobile_page('m_home', 'Company', body, js, br, bt, user=user)
+
+
+def _mobile_directory_page(br: str, bt: str, category: str = "",
+                            user: dict = None) -> str:
+    """Mobile directory listing. `category` in {'', 'attorney', 'guerilla',
+    'community'}; empty string means all. Tap a row → /company/{id}."""
+    user = user or {}
+    title = {
+        "attorney":  "Attorney Directory",
+        "guerilla":  "Guerilla Directory",
+        "community": "Community Directory",
+    }.get(category, "All Contacts")
+    subtitle = {
+        "attorney":  "Law firms & referral partners",
+        "guerilla":  "Local businesses & health partners",
+        "community": "Community groups & events",
+    }.get(category, "Every outreach company")
+    body = (
+        '<div class="mobile-hdr">'
+        f'<div><div class="mobile-hdr-title">{title}</div>'
+        f'<div class="mobile-hdr-sub">{subtitle}</div></div>'
+        '<div style="display:flex;align-items:center;gap:10px">'
+        '<button class="m-theme-btn" onclick="mToggleTheme()" id="m-theme-btn"><span id="m-theme-icon">\U0001f319</span></button>'
+        '<a href="/" style="font-size:12px;color:var(--text3);text-decoration:none">← Home</a>'
+        '</div>'
+        '</div>'
+        '<div class="mobile-body">'
+        '<input type="search" id="dir-search" placeholder="Search name, address, phone…" oninput="renderDir()" '
+        'style="width:100%;padding:10px 12px;border:1px solid var(--border);border-radius:8px;'
+        'background:var(--card);color:var(--text);font-size:14px;margin-bottom:10px;font-family:inherit">'
+        '<div id="dir-filter" style="display:flex;gap:6px;margin-bottom:10px;flex-wrap:wrap"></div>'
+        '<div id="dir-summary" style="font-size:12px;color:var(--text3);margin-bottom:8px">Loading…</div>'
+        '<div id="dir-list"><div class="loading">Loading…</div></div>'
+        '</div>'
+    )
+    cat_js = repr(category or "")
+    js = f"""
+var CATEGORY = {cat_js};
+var _DIR_ROWS = [];
+var _DIR_STATUS = 'all';
+
+var STATUS_META = {{
+  'Not Contacted':  {{color: '#64748b'}},
+  'Contacted':      {{color: '#2563eb'}},
+  'In Discussion':  {{color: '#ea580c'}},
+  'Active Partner': {{color: '#059669'}},
+  'Blacklisted':    {{color: '#dc2626'}},
+}};
+
+function esc(s) {{
+  return String(s == null ? '' : s)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}}
+
+function svJS(v) {{
+  if (!v) return '';
+  if (typeof v === 'object' && !Array.isArray(v)) return v.value || '';
+  if (Array.isArray(v) && v.length) return (v[0] && v[0].value) || (v[0] && v[0].name) || String(v[0]);
+  return String(v);
+}}
+
+function renderStatusFilter() {{
+  var counts = {{ all: _DIR_ROWS.length }};
+  Object.keys(STATUS_META).forEach(function(k) {{ counts[k] = 0; }});
+  _DIR_ROWS.forEach(function(c) {{
+    var s = svJS(c['Contact Status']) || 'Not Contacted';
+    counts[s] = (counts[s] || 0) + 1;
+  }});
+  var opts = ['all'].concat(Object.keys(STATUS_META));
+  var html = '';
+  opts.forEach(function(k) {{
+    if (k !== 'all' && !counts[k]) return;
+    var active = k === _DIR_STATUS;
+    var color = k === 'all' ? '#0f172a' : (STATUS_META[k] || {{}}).color || '#64748b';
+    var label = k === 'all' ? 'All' : k;
+    html +=
+      '<button onclick="setStatus(\\'' + k + '\\')" ' +
+      'style="padding:5px 10px;border-radius:14px;font-size:11px;font-weight:600;cursor:pointer;font-family:inherit;' +
+      'border:1px solid ' + (active ? color : 'var(--border)') + ';' +
+      'background:' + (active ? color : 'var(--card)') + ';' +
+      'color:' + (active ? '#fff' : 'var(--text2)') + '">' +
+      esc(label) + ' ' + counts[k] + '</button>';
+  }});
+  document.getElementById('dir-filter').innerHTML = html;
+}}
+
+function setStatus(k) {{
+  _DIR_STATUS = k;
+  renderStatusFilter();
+  renderDir();
+}}
+
+function renderDir() {{
+  var q = (document.getElementById('dir-search').value || '').toLowerCase().trim();
+  var filtered = _DIR_ROWS.filter(function(c) {{
+    if (_DIR_STATUS !== 'all') {{
+      var s = svJS(c['Contact Status']) || 'Not Contacted';
+      if (s !== _DIR_STATUS) return false;
+    }}
+    if (!q) return true;
+    var hay = ((c.Name || '') + ' ' + (c.Address || '') + ' ' + (c.Phone || '')).toLowerCase();
+    return hay.indexOf(q) !== -1;
+  }});
+  filtered.sort(function(a, b) {{
+    return (a.Name || '').localeCompare(b.Name || '');
+  }});
+  document.getElementById('dir-summary').textContent =
+    filtered.length + ' compan' + (filtered.length === 1 ? 'y' : 'ies');
+  if (!filtered.length) {{
+    document.getElementById('dir-list').innerHTML =
+      '<div style="text-align:center;padding:30px 0;color:var(--text3);font-size:13px">No matches.</div>';
+    return;
+  }}
+  var html = '';
+  filtered.forEach(function(c) {{
+    var status = svJS(c['Contact Status']) || 'Not Contacted';
+    var sMeta = STATUS_META[status] || {{color: '#64748b'}};
+    html +=
+      '<div onclick="location.href=\\'/company/' + c.id + '\\'" ' +
+      'style="background:var(--card);border:1px solid var(--border);border-radius:10px;padding:10px 12px;' +
+      'margin-bottom:6px;cursor:pointer;display:flex;align-items:center;gap:10px">' +
+      '<div style="flex:1;min-width:0">' +
+      '<div style="font-size:14px;font-weight:700;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + esc(c.Name || '(unnamed)') + '</div>' +
+      (c.Address ? '<div style="font-size:11px;color:var(--text3);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + esc(c.Address) + '</div>' : '') +
+      '</div>' +
+      '<span style="background:' + sMeta.color + '22;color:' + sMeta.color + ';font-size:10px;font-weight:600;padding:2px 8px;border-radius:10px;white-space:nowrap">' + esc(status) + '</span>' +
+      '</div>';
+  }});
+  document.getElementById('dir-list').innerHTML = html;
+}}
+
+async function loadDir() {{
+  try {{
+    var r = await fetch('/api/data/{T_COMPANIES}');
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    var rows = await r.json();
+    if (CATEGORY) {{
+      rows = rows.filter(function(c) {{
+        return (svJS(c.Category) || '').toLowerCase() === CATEGORY;
+      }});
+    }}
+    // Exclude Permanently Closed
+    rows = rows.filter(function(c) {{ return !c['Permanently Closed']; }});
+    _DIR_ROWS = rows;
+  }} catch (e) {{
+    document.getElementById('dir-summary').textContent = '';
+    document.getElementById('dir-list').innerHTML =
+      '<div style="text-align:center;padding:30px 0;color:#ef4444;font-size:13px">Failed to load: ' + esc(e.message || 'error') + '</div>';
+    return;
+  }}
+  renderStatusFilter();
+  renderDir();
+}}
+
+loadDir();
+"""
+    return _mobile_page('m_home', title, body, js, br, bt, user=user)
 
 
 def _mobile_lead_capture_page(br: str, bt: str, user: dict = None) -> str:
@@ -480,6 +1016,16 @@ def _mobile_lead_capture_page(br: str, bt: str, user: dict = None) -> str:
         '<option value="">No event (walk-in / field)</option>'
         '</select>'
         '</div>'
+        # Referred from company — autocompletes from T_COMPANIES. If a match is
+        # picked, the backend marks that company as "Contacted" + logs activity.
+        '<div style="margin-bottom:14px">'
+        '<label style="font-size:11px;font-weight:600;color:var(--text3);text-transform:uppercase;display:block;margin-bottom:4px">Referred from company (optional)</label>'
+        '<input type="text" id="lf-company" list="lf-company-list" placeholder="Type to search…" '
+        'style="width:100%;background:var(--input-bg);border:1px solid var(--border);color:var(--text);'
+        'border-radius:8px;padding:10px 12px;font-size:14px;box-sizing:border-box">'
+        '<datalist id="lf-company-list"></datalist>'
+        '<div id="lf-company-hint" style="font-size:11px;color:var(--text3);margin-top:4px;min-height:14px"></div>'
+        '</div>'
         # Notes
         '<div style="margin-bottom:18px">'
         '<label style="font-size:11px;font-weight:600;color:var(--text3);text-transform:uppercase;display:block;margin-bottom:4px">Notes</label>'
@@ -526,6 +1072,50 @@ async function loadEvents() {{
   }});
 }}
 
+// Referred-company autocomplete — populates the datalist + enables
+// resolveCompanyId() lookup on submit (Feature #6).
+var _COMPANIES_LOOKUP = {{}};  // lower-cased name -> id
+async function loadCompanies() {{
+  try {{
+    var rows = await fetchAll({T_COMPANIES});
+    var dl = document.getElementById('lf-company-list');
+    rows.sort(function(a, b) {{ return (a.Name || '').localeCompare(b.Name || ''); }});
+    rows.forEach(function(c) {{
+      if (!c.Name) return;
+      _COMPANIES_LOOKUP[c.Name.trim().toLowerCase()] = c.id;
+      var opt = document.createElement('option');
+      opt.value = c.Name;
+      dl.appendChild(opt);
+    }});
+  }} catch (e) {{
+    // Non-fatal: form still works without company linking
+  }}
+}}
+
+function resolveCompanyId(input) {{
+  var name = (input || '').trim().toLowerCase();
+  if (!name) return null;
+  return _COMPANIES_LOOKUP[name] || null;
+}}
+
+(function() {{
+  var inp = document.getElementById('lf-company');
+  var hint = document.getElementById('lf-company-hint');
+  if (!inp || !hint) return;
+  inp.addEventListener('input', function() {{
+    var v = inp.value.trim();
+    if (!v) {{ hint.textContent = ''; hint.style.color = 'var(--text3)'; return; }}
+    var id = resolveCompanyId(v);
+    if (id) {{
+      hint.style.color = '#059669';
+      hint.textContent = '✓ Match found — this lead will be linked to the company.';
+    }} else {{
+      hint.style.color = 'var(--text3)';
+      hint.textContent = 'No exact match (will be saved as free-text source).';
+    }}
+  }});
+}})();
+
 async function submitLead() {{
   var name = (document.getElementById('lf-name').value || '').trim();
   var phone = (document.getElementById('lf-phone').value || '').trim();
@@ -551,6 +1141,8 @@ async function submitLead() {{
   btn.textContent = 'Saving\u2026';
   st.textContent = '';
 
+  var companyName = (document.getElementById('lf-company').value || '').trim();
+  var companyId   = resolveCompanyId(companyName);
   try {{
     var r = await fetch('/api/leads/capture', {{
       method: 'POST',
@@ -561,7 +1153,8 @@ async function submitLead() {{
         email: email,
         service: service,
         event_id: eventId ? parseInt(eventId) : null,
-        notes: notes
+        notes: notes,
+        company_id: companyId || null,
       }})
     }});
     var d = await r.json();
@@ -594,6 +1187,7 @@ function resetForm() {{
 }}
 
 loadEvents();
+loadCompanies();
 """
     return _mobile_page('m_lead', 'Capture Lead', body, js, br, bt, user=user)
 

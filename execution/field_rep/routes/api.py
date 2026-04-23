@@ -147,6 +147,44 @@ async def outreach_due(request: Request):
     return await outreach_api.get_outreach_due(br, bt, session, _cached_rows)
 
 
+# ─── Companies: read + activity log (mobile detail page uses these) ─────────
+async def _invalidate_async(*tids: int) -> None:
+    await _invalidate(*tids)
+
+
+@router.get("/api/companies/{company_id}")
+async def get_company(company_id: int, request: Request):
+    session = await get_session(request)
+    if not session:
+        return JSONResponse({"error": "unauthenticated"}, status_code=401)
+    from hub import outreach_api
+    br, bt = _env()
+    return await outreach_api.get_company(br, bt, company_id)
+
+
+@router.get("/api/companies/{company_id}/activities")
+async def get_company_activities(company_id: int, request: Request):
+    session = await get_session(request)
+    if not session:
+        return JSONResponse({"error": "unauthenticated"}, status_code=401)
+    from hub import outreach_api
+    br, bt = _env()
+    return await outreach_api.get_company_activities(br, bt, company_id, _cached_rows)
+
+
+@router.post("/api/companies/{company_id}/activities")
+async def create_company_activity(company_id: int, request: Request):
+    session = await get_session(request)
+    if not session:
+        return JSONResponse({"error": "unauthenticated"}, status_code=401)
+    from hub import outreach_api
+    br, bt = _env()
+    return await outreach_api.create_company_activity(
+        request, br, bt, session, company_id,
+        invalidate=_invalidate_async,
+    )
+
+
 # ─── Lead capture (field-rep form) ───────────────────────────────────────────
 # Field reps submit the Capture Lead form to this endpoint. Creates a T_LEADS
 # row; on success, the mobile UI closes the form. The hub has an analogous

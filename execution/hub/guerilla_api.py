@@ -29,7 +29,7 @@ from fastapi.responses import JSONResponse
 from .access import _has_hub_access, _is_admin
 from .constants import (
     T_EVENTS, T_GOR_ACTS, T_GOR_BOXES, T_GOR_ROUTES, T_GOR_ROUTE_STOPS,
-    T_GOR_VENUES, T_COMPANIES, T_LEADS,
+    T_GOR_VENUES, T_COMPANIES, T_LEADS, T_ACTIVITIES,
 )
 
 # Type: backend-agnostic cached-table fetcher. Each app passes its own.
@@ -913,6 +913,21 @@ async def capture_lead(
         if event:
             source = event.get("Name") or "Event"
 
+    # Optional: link to a referring Company — if set, we'll prefer the
+    # company's Name as Source and auto-mark the company "Contacted" + log
+    # an activity once the lead is created (Feature #6).
+    referred_company_id = body.get("company_id")
+    referred_company_row = None
+    if referred_company_id:
+        try:
+            cid = int(referred_company_id)
+            companies = await cached_rows(T_COMPANIES)
+            referred_company_row = next((c for c in companies if c.get("id") == cid), None)
+            if referred_company_row and not event:  # event name takes priority
+                source = referred_company_row.get("Name") or source
+        except Exception:
+            referred_company_row = None
+
     fields: dict = {
         "Name": name,
         "Phone": phone,
@@ -940,6 +955,48 @@ async def capture_lead(
                 headers={"Authorization": f"Token {bt}", "Content-Type": "application/json"},
                 json={"Lead Count": cur_count + 1},
             )
+
+    # Feature #6: mark the referring Company "Contacted" + log an activity
+    # on its CRM feed so outreach stays in sync with what reps are doing.
+    if referred_company_row and r.status_code in (200, 201):
+        from datetime import datetime as _dt_inner, timezone as _tz_inner
+        iso_now = _dt_inner.now(_tz_inner.utc).isoformat()
+        today = iso_now[:10]
+        current_status = referred_company_row.get("Contact Status")
+        if isinstance(current_status, dict):
+            current_status = current_status.get("value", "")
+        patch = {"Updated": iso_now}
+        # Promote from Not Contacted / blank → Contacted. Never downgrade.
+        if (current_status or "").strip() in ("", "Not Contacted"):
+            patch["Contact Status"] = "Contacted"
+        try:
+            async with httpx.AsyncClient(timeout=15) as client:
+                await client.patch(
+                    f"{br}/api/database/rows/table/{T_COMPANIES}/{referred_company_row['id']}/?user_field_names=true",
+                    headers={"Authorization": f"Token {bt}", "Content-Type": "application/json"},
+                    json=patch,
+                )
+                # Log activity on the company's CRM feed
+                activity_payload = {
+                    "Summary": f"Lead captured in the field: {name} ({phone}). Reason: {service or '(none)'}",
+                    "Kind":    "user_activity",
+                    "Type":    "Lead",
+                    "Date":    today,
+                    "Author":  user.get("email", ""),
+                    "Created": iso_now,
+                    "Company": [referred_company_row["id"]],
+                }
+                clean_act = {k: v for k, v in activity_payload.items() if v not in (None, "")}
+                await client.post(
+                    f"{br}/api/database/rows/table/{T_ACTIVITIES}/?user_field_names=true",
+                    headers={"Authorization": f"Token {bt}", "Content-Type": "application/json"},
+                    json=clean_act,
+                )
+        except Exception:
+            pass
+        if invalidate is not None:
+            try: await invalidate(T_COMPANIES, T_ACTIVITIES)
+            except Exception: pass
 
     if invalidate is not None:
         try: await invalidate(T_LEADS, T_EVENTS)

@@ -20,10 +20,13 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 
 from hub.access import _is_admin
 from hub.mobile import (
+    _mobile_company_detail_page,
+    _mobile_directory_page,
     _mobile_home_page,
     _mobile_lead_capture_page,
     _mobile_map_page,
     _mobile_outreach_due_page,
+    _mobile_outreach_map_page,
     _mobile_recent_page,
     _mobile_route_page,
     _mobile_routes_dashboard_page,
@@ -90,6 +93,55 @@ async def outreach_due_page(request: Request):
     if not user:
         return RedirectResponse(url="/login")
     return HTMLResponse(_mobile_outreach_due_page(br, bt, user=user))
+
+
+@router.get("/outreach/map", response_class=HTMLResponse)
+async def outreach_map_page(request: Request):
+    user, br, bt = await _guard(request)
+    if not user:
+        return RedirectResponse(url="/login")
+    return HTMLResponse(_mobile_outreach_map_page(br, bt, user=user))
+
+
+@router.get("/company/{company_id}", response_class=HTMLResponse)
+async def company_detail_page(company_id: int, request: Request):
+    user, br, bt = await _guard(request)
+    if not user:
+        return RedirectResponse(url="/login")
+    return HTMLResponse(_mobile_company_detail_page(br, bt, company_id, user=user))
+
+
+@router.get("/directory", response_class=HTMLResponse)
+async def directory_page(request: Request):
+    """Unified directory — all outreach companies across categories."""
+    user, br, bt = await _guard(request)
+    if not user:
+        return RedirectResponse(url="/login")
+    return HTMLResponse(_mobile_directory_page(br, bt, category="", user=user))
+
+
+@router.get("/attorney", response_class=HTMLResponse)
+async def attorney_directory_page(request: Request):
+    user, br, bt = await _guard(request)
+    if not user:
+        return RedirectResponse(url="/login")
+    return HTMLResponse(_mobile_directory_page(br, bt, category="attorney", user=user))
+
+
+@router.get("/guerilla", response_class=HTMLResponse)
+async def guerilla_directory_page(request: Request):
+    user, br, bt = await _guard(request)
+    if not user:
+        return RedirectResponse(url="/login")
+    return HTMLResponse(_mobile_directory_page(br, bt, category="guerilla", user=user))
+
+
+@router.get("/community", response_class=HTMLResponse)
+async def community_directory_page(request: Request):
+    user, br, bt = await _guard(request)
+    if not user:
+        return RedirectResponse(url="/login")
+    return HTMLResponse(_mobile_directory_page(br, bt, category="community", user=user))
 
 
 @router.get("/map", response_class=HTMLResponse)
