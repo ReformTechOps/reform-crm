@@ -1,17 +1,9 @@
 """
 Page routes for the field-rep app.
 
-Ports the hub's `/m/*` handlers to root URLs (since the whole app IS the
-mobile app now). Page bodies come from `hub.mobile` — we only register the
-URLs and wire in the auth guard.
-
-    hub /m          -> routes /
-    hub /m/routes   -> routes /routes
-    hub /m/route    -> routes /route
-    hub /m/lead     -> routes /lead
-    hub /m/recent   -> routes /recent
-    hub /m/map      -> routes /map   (admin-only, same as hub)
-    hub /m/log      -> routes /log   (legacy redirect to /map)
+Maps root URLs to the page renderers in `field_rep.pages`. This file only
+registers the URLs and wires in the auth guard — the rendering lives in
+the pages package, which previously lived in `hub/mobile.py`.
 """
 import os
 
@@ -19,7 +11,7 @@ from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 
 from hub.access import _is_admin
-from hub.mobile import (
+from field_rep.pages import (
     _mobile_company_detail_page,
     _mobile_directory_page,
     _mobile_home_page,

@@ -1,0 +1,787 @@
+"""Active route map + stop bottom sheet."""
+
+import os
+
+from hub.shared import (
+    _mobile_page, _is_admin,
+    T_GOR_VENUES, T_GOR_ACTS, T_GOR_BOXES, T_COMPANIES,
+)
+from hub.guerilla import GFR_EXTRA_HTML, GFR_EXTRA_JS
+from hub.contact_detail import contact_actions_js
+
+
+def _mobile_route_page(br: str, bt: str, user: dict = None) -> str:
+    import datetime
+    gk = os.environ.get("GOOGLE_MAPS_API_KEY", "")
+    user = user or {}
+    today_str = datetime.date.today().isoformat()
+    user_email = user.get('email', '')
+    user_name = user.get('name', '')
+    body = (
+        # Full-screen map for route
+        '<div class="m-map-wrap" id="rmap"></div>'
+        # "No Active Routes" overlay (shown/hidden by JS)
+        '<div id="rt-empty" style="display:none;position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);z-index:105;text-align:center;pointer-events:none">'
+        '<div style="background:var(--bg2);border-radius:16px;padding:28px 36px;box-shadow:0 4px 20px rgba(0,0,0,.3)">'
+        '<div style="font-size:18px;font-weight:700;color:var(--text)">No Active Routes</div>'
+        '</div></div>'
+        # Progress bar overlay at top
+        '<div id="rt-progress" style="position:fixed;top:0;left:0;right:0;z-index:110;background:var(--bg2);padding:10px 16px;border-bottom:1px solid var(--border);display:none">'
+        '<div style="display:flex;justify-content:space-between;align-items:center">'
+        '<div id="rt-name" style="font-size:14px;font-weight:700"></div>'
+        '<a href="/" style="font-size:12px;color:var(--text3);text-decoration:none">\u2190 Home</a>'
+        '</div>'
+        '<div id="rt-count" style="font-size:12px;color:var(--text3);margin-top:3px"></div>'
+        '<div style="margin-top:6px;background:var(--border);border-radius:4px;height:5px;overflow:hidden">'
+        '<div id="rt-bar" style="height:100%;background:#ea580c;border-radius:4px;width:0%"></div>'
+        '</div>'
+        '</div>'
+        # Bottom sheet (same pattern as mobile map)
+        '<div class="m-sheet-backdrop" id="m-backdrop" onclick="closeRouteSheet()"></div>'
+        '<div class="m-sheet" id="m-sheet">'
+        '<div class="m-sheet-handle" onclick="closeRouteSheet()"></div>'
+        '<div id="m-sheet-body" style="padding:0 0 20px"></div>'
+        '</div>'
+    )
+    route_js = f"""
+const RGK = {repr(gk)};
+const _GGOR_VENUES = {T_GOR_VENUES};
+const _GGOR_ACTS   = {T_GOR_ACTS};
+const _GGOR_BOXES  = {T_GOR_BOXES};
+const _GOFF_LAT = 33.9478, _GOFF_LNG = -118.1335;
+const _STATUS_COLORS = {{'Pending':'#4285f4','Visited':'#059669','Skipped':'#f97316','Not Reached':'#ef4444'}};
+var _routeData = null, _rMap = null, _rMarkers = {{}}, _rPolyline = null, _rOfficeMarker = null;
+var _rCurrentStop = null;  // currently selected stop (full venue data)
+var _userLat = null, _userLng = null, _userMarker = null;
+var _allBoxesCache = null;  // cached boxes for pickup badges
+
+function _haversine(lat1, lng1, lat2, lng2) {{
+  var R = 3958.8; // miles
+  var dLat = (lat2-lat1)*Math.PI/180;
+  var dLng = (lng2-lng1)*Math.PI/180;
+  var a = Math.sin(dLat/2)*Math.sin(dLat/2)
+        + Math.cos(lat1*Math.PI/180)*Math.cos(lat2*Math.PI/180)
+        * Math.sin(dLng/2)*Math.sin(dLng/2);
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+}}
+
+if (navigator.geolocation) {{
+  navigator.geolocation.watchPosition(function(pos) {{
+    _userLat = pos.coords.latitude; _userLng = pos.coords.longitude;
+    if (_rMap && _userMarker) _userMarker.setPosition({{lat:_userLat,lng:_userLng}});
+    else if (_rMap) {{
+      _userMarker = new google.maps.Marker({{position:{{lat:_userLat,lng:_userLng}},map:_rMap,
+        icon:{{path:google.maps.SymbolPath.CIRCLE,scale:7,fillColor:'#2563eb',fillOpacity:1,strokeColor:'#fff',strokeWeight:2}},
+        title:'You',zIndex:999}});
+    }}
+  }}, function(){{}}, {{timeout:10000,enableHighAccuracy:true}});
+}}
+
+async function loadRoute() {{
+  // Always init map first
+  initRouteMap();
+  try {{
+    var [routeResp, boxes] = await Promise.all([
+      fetch('/api/guerilla/routes/today').then(function(r){{return r.json();}}),
+      fetchAll(_GGOR_BOXES)
+    ]);
+    _routeData = routeResp;
+    _allBoxesCache = boxes;
+    if (!_routeData || !_routeData.route) {{
+      document.getElementById('rt-empty').style.display = 'block';
+      return;
+    }}
+    document.getElementById('rt-empty').style.display = 'none';
+    updateProgress();
+    renderRouteStops();
+  }} catch(e) {{
+    document.getElementById('rt-empty').style.display = 'block';
+  }}
+}}
+
+function updateProgress() {{
+  if (!_routeData || !_routeData.route) return;
+  var stops = _routeData.stops || [];
+  var visited = stops.filter(function(s){{return s.status==='Visited';}}).length;
+  var skipped = stops.filter(function(s){{return s.status==='Skipped';}}).length;
+  var notReached = stops.filter(function(s){{return s.status==='Not Reached';}}).length;
+  var total = stops.length;
+  var done = visited + skipped + notReached;
+  var pct = total ? Math.round(done/total*100) : 0;
+  document.getElementById('rt-progress').style.display = 'block';
+  document.getElementById('rt-name').textContent = _routeData.route.name || 'Route';
+  var summary = visited + ' visited';
+  if (skipped) summary += ', ' + skipped + ' skipped';
+  if (notReached) summary += ', ' + notReached + ' missed';
+  summary += ' of ' + total + ' stops';
+  // Total route distance (office → stop 1 → stop 2 → ...)
+  var totalDist = 0;
+  var prevLat = _GOFF_LAT, prevLng = _GOFF_LNG;
+  stops.forEach(function(s) {{
+    var sLat = parseFloat(s.lat), sLng = parseFloat(s.lng);
+    if (sLat && sLng) {{
+      totalDist += _haversine(prevLat, prevLng, sLat, sLng);
+      prevLat = sLat; prevLng = sLng;
+    }}
+  }});
+  if (totalDist > 0) summary += ' \u2022 ' + totalDist.toFixed(1) + ' mi total';
+  document.getElementById('rt-count').textContent = summary;
+  document.getElementById('rt-bar').style.width = pct + '%';
+}}
+
+function initRouteMap() {{
+  if (_rMap) return;  // already initialized
+  if (!RGK) return;
+  window._rMapReady = function() {{
+    var el = document.getElementById('rmap');
+    el.style.height = el.offsetHeight + 'px';
+    _rMap = new google.maps.Map(el, {{
+      center: {{lat: _GOFF_LAT, lng: _GOFF_LNG}}, zoom: 13,
+      mapTypeControl: false, streetViewControl: false,
+      styles: [{{featureType:'poi',stylers:[{{visibility:'off'}}]}},
+               {{featureType:'transit',stylers:[{{visibility:'off'}}]}}]
+    }});
+    setTimeout(function(){{ google.maps.event.trigger(_rMap, 'resize'); }}, 100);
+    // If route data already loaded, render stops
+    if (_routeData && _routeData.route) renderRouteStops();
+  }};
+  var s = document.createElement('script');
+  s.src = 'https://maps.googleapis.com/maps/api/js?key=' + RGK + '&callback=_rMapReady';
+  s.async = true; document.head.appendChild(s);
+}}
+
+function renderRouteStops() {{
+  if (!_rMap || !_routeData || !_routeData.route) return;
+  // Clear existing markers/polyline
+  Object.values(_rMarkers).forEach(function(m){{ m.setMap(null); }});
+  _rMarkers = {{}};
+  if (_rOfficeMarker) {{ _rOfficeMarker.setMap(null); _rOfficeMarker = null; }}
+  if (_rPolyline) {{ _rPolyline.setMap(null); _rPolyline = null; }}
+  var stops = _routeData.stops || [];
+  var bounds = new google.maps.LatLngBounds();
+  var pathCoords = [];
+
+  // Start point: Reform Chiropractic office
+  var officePos = {{lat: _GOFF_LAT, lng: _GOFF_LNG}};
+  pathCoords.push(officePos);
+  bounds.extend(officePos);
+  _rOfficeMarker = new google.maps.Marker({{
+    position: officePos, map: _rMap,
+    label: {{text: '\u2726', color: '#fff', fontWeight: '700', fontSize: '14px'}},
+    icon: {{path:google.maps.SymbolPath.CIRCLE, scale:16, fillColor:'#1e3a5f', fillOpacity:1, strokeColor:'#fff', strokeWeight:3}},
+    title: 'Reform Chiropractic',
+    zIndex: 900
+  }});
+
+  stops.forEach(function(stop, i) {{
+    var lat = parseFloat(stop.lat), lng = parseFloat(stop.lng);
+    if (!lat || !lng) return;
+    var pos = {{lat:lat, lng:lng}};
+    pathCoords.push(pos);
+    bounds.extend(pos);
+    var color = _STATUS_COLORS[stop.status] || '#4285f4';
+    var marker = new google.maps.Marker({{
+      position: pos, map: _rMap,
+      label: {{text: String(i+1), color: '#fff', fontWeight: '700', fontSize: '12px'}},
+      icon: {{path:google.maps.SymbolPath.CIRCLE, scale:14, fillColor:color, fillOpacity:1, strokeColor:'#fff', strokeWeight:2}},
+      title: stop.name || ''
+    }});
+    (function(s) {{ marker.addListener('click', function() {{ openRouteSheet(s); }}); }})(stop);
+    _rMarkers[stop.stop_id] = marker;
+  }});
+  if (pathCoords.length > 1) {{
+    _rPolyline = new google.maps.Polyline({{
+      path: pathCoords, geodesic: true,
+      strokeColor: '#ea580c', strokeOpacity: 0.7, strokeWeight: 3,
+      map: _rMap
+    }});
+  }}
+  if (pathCoords.length) {{
+    _rMap.fitBounds(bounds, {{top:70,bottom:80,left:20,right:20}});
+  }}
+}}
+
+function closeRouteSheet() {{
+  document.getElementById('m-sheet').classList.remove('open');
+  document.getElementById('m-backdrop').classList.remove('open');
+  _rCurrentStop = null;
+}}
+
+function openRouteSheet(stop) {{
+  _rCurrentStop = stop;
+  document.getElementById('m-sheet').classList.add('open');
+  document.getElementById('m-backdrop').classList.add('open');
+  document.getElementById('m-sheet-body').innerHTML = renderRouteSheet(stop);
+  // Load venue data for tabs
+  loadRouteVenueData(stop);
+}}
+
+function _getBoxPickupInfo(venueId) {{
+  if (!_allBoxesCache) return null;
+  var activeBoxes = _allBoxesCache.filter(function(b) {{
+    var biz = b['Business'];
+    var st = (b['Status'] && b['Status'].value) || b['Status'] || '';
+    return st === 'Active' && Array.isArray(biz) && biz.some(function(r){{return r.id===venueId;}});
+  }});
+  if (!activeBoxes.length) return null;
+  var dueCount = 0;
+  activeBoxes.forEach(function(b) {{
+    if (b['Date Placed']) {{
+      var age = -daysUntil(b['Date Placed']);
+      var pd = parseInt(b['Pickup Days']) || 14;
+      if (age >= pd) dueCount++;
+    }}
+  }});
+  return {{total: activeBoxes.length, due: dueCount}};
+}}
+
+function renderRouteSheet(stop) {{
+  var name = esc(stop.name || '(unnamed)');
+  var addr = stop.address || '';
+  var status = stop.status || 'Pending';
+  var sc = _STATUS_COLORS[status] || '#4285f4';
+  var id = stop.stop_id;
+
+  // Header
+  var html = '<div class="m-sheet-sec">';
+  html += '<div style="font-size:17px;font-weight:700;margin-bottom:6px">' + name + '</div>';
+  html += '<div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">';
+  html += '<span style="background:'+sc+'20;color:'+sc+';font-size:11px;padding:2px 8px;border-radius:4px;font-weight:600">' + esc(status) + '</span>';
+  html += '<span style="font-size:11px;color:var(--text3)">Stop ' + (stop.order||'') + '</span>';
+  // Distance from previous stop (or office if first)
+  if (stop.lat && stop.lng && _routeData && _routeData.stops) {{
+    var idx = _routeData.stops.indexOf(stop);
+    var prevLat, prevLng, fromLabel;
+    if (idx <= 0) {{
+      prevLat = _GOFF_LAT; prevLng = _GOFF_LNG; fromLabel = 'from office';
+    }} else {{
+      var prev = _routeData.stops[idx-1];
+      prevLat = parseFloat(prev.lat); prevLng = parseFloat(prev.lng);
+      fromLabel = 'from prev stop';
+    }}
+    if (prevLat && prevLng) {{
+      var dist = _haversine(prevLat, prevLng, parseFloat(stop.lat), parseFloat(stop.lng));
+      html += '<span style="font-size:10px;color:var(--text3);background:var(--bg);padding:2px 6px;border-radius:4px">' + dist.toFixed(1) + ' mi ' + fromLabel + '</span>';
+    }}
+  }}
+  // Box pickup badge (server-provided via stop.pending_box for authoritative state)
+  if (stop.pending_box) {{
+    var pb = stop.pending_box;
+    var overdueLbl = pb.overdue_by > 0 ? (' (' + pb.overdue_by + 'd overdue)') : '';
+    html += '<span style="background:#f59e0b20;color:#f59e0b;font-size:10px;padding:2px 7px;border-radius:4px;font-weight:600">\U0001f4e6 Box pending pickup' + overdueLbl + '</span>';
+  }} else {{
+    // Fallback: show count of active boxes if none pending
+    var boxInfo = _getBoxPickupInfo(stop.venue_id);
+    if (boxInfo && boxInfo.total > 0) {{
+      html += '<span style="background:#05966920;color:#059669;font-size:10px;padding:2px 7px;border-radius:4px;font-weight:600">\U0001f4e6 '+boxInfo.total+' active box'+(boxInfo.total>1?'es':'')+'</span>';
+    }}
+  }}
+  html += '</div>';
+  // Pending pickup notice (prominent, under header)
+  if (stop.pending_box && stop.pending_box.location) {{
+    html += '<div style="margin-top:8px;padding:10px 12px;background:#f59e0b15;border:1px solid #f59e0b40;border-radius:8px;font-size:12px;color:#f59e0b"><strong>\U0001f4e6 Pick up the box while you\\'re here.</strong> Location: ' + esc(stop.pending_box.location) + '. It will be marked picked up automatically when you check in.</div>';
+  }} else if (stop.pending_box) {{
+    html += '<div style="margin-top:8px;padding:10px 12px;background:#f59e0b15;border:1px solid #f59e0b40;border-radius:8px;font-size:12px;color:#f59e0b"><strong>\U0001f4e6 Pick up the box while you\\'re here.</strong> It will be marked picked up automatically when you check in.</div>';
+  }}
+  html += '</div>';
+
+  // Tab bar
+  html += '<div class="m-tabs">';
+  html += '<div class="m-tab active" onclick="mSheetTab(this,\\'rp-info-'+id+'\\')">Info</div>';
+  html += '<div class="m-tab" onclick="mSheetTab(this,\\'rp-acts-'+id+'\\')">Activity</div>';
+  html += '<div class="m-tab" onclick="mSheetTab(this,\\'rp-evts-'+id+'\\')">Events</div>';
+  html += '<div class="m-tab" onclick="mSheetTab(this,\\'rp-boxes-'+id+'\\')">Boxes</div>';
+  html += '</div>';
+
+  // Info tab
+  html += '<div class="m-panel active" id="rp-info-'+id+'" style="padding:12px 16px">';
+  if (addr) {{
+    var mapsLink = 'https://maps.google.com/?q='+encodeURIComponent(addr);
+    html += '<div style="margin-bottom:8px;font-size:13px">\U0001f4cd '+esc(addr)+' <a href="'+mapsLink+'" target="_blank" style="color:#3b82f6;font-size:12px">Navigate \u2197</a></div>';
+  }}
+  html += '<div id="rv-info-'+id+'" style="color:var(--text3);font-size:13px">Loading venue details\u2026</div>';
+  html += '</div>';
+
+  // Activity tab
+  html += '<div class="m-panel" id="rp-acts-'+id+'" style="padding:12px 16px">';
+  html += '<div id="rv-acts-'+id+'" style="color:var(--text3);font-size:13px">Loading\u2026</div>';
+  html += '</div>';
+
+  // Events tab
+  html += '<div class="m-panel" id="rp-evts-'+id+'" style="padding:12px 16px">';
+  html += '<div class="m-sheet-lbl">Schedule Event</div>';
+  html += '<div style="display:grid;gap:8px;margin-bottom:14px">';
+  html += '<button onclick="scheduleRouteEvent(\\'Mobile Massage Service\\')" style="width:100%;background:var(--card);border:1px solid var(--border);color:var(--text1);border-radius:8px;padding:12px 16px;font-size:14px;font-weight:600;cursor:pointer;min-height:48px;text-align:left">\U0001f486 Mobile Massage</button>';
+  html += '<button onclick="scheduleRouteEvent(\\'Lunch and Learn\\')" style="width:100%;background:var(--card);border:1px solid var(--border);color:var(--text1);border-radius:8px;padding:12px 16px;font-size:14px;font-weight:600;cursor:pointer;min-height:48px;text-align:left">\U0001f37d\ufe0f Lunch & Learn</button>';
+  html += '<button onclick="scheduleRouteEvent(\\'Health Assessment Screening\\')" style="width:100%;background:var(--card);border:1px solid var(--border);color:var(--text1);border-radius:8px;padding:12px 16px;font-size:14px;font-weight:600;cursor:pointer;min-height:48px;text-align:left">\U0001fa7a Health Assessment</button>';
+  html += '</div>';
+  html += '<div class="m-sheet-lbl">Event History</div>';
+  html += '<div id="rv-evts-'+id+'" style="color:var(--text3);font-size:13px">Loading\u2026</div>';
+  html += '</div>';
+
+  // Boxes tab
+  html += '<div class="m-panel" id="rp-boxes-'+id+'" style="padding:12px 16px">';
+  html += '<div id="rv-boxes-'+id+'" style="color:var(--text3);font-size:13px">Loading\u2026</div>';
+  html += '<hr style="border:none;border-top:1px solid var(--border);margin:12px 0">';
+  html += '<div class="m-sheet-lbl">\U0001f4e6 Place New Box</div>';
+  html += '<div style="display:grid;gap:8px">';
+  html += '<input type="text" id="rv-box-loc-'+id+'" placeholder="Location (e.g. Front desk)" style="background:var(--bg);border:1px solid var(--border);color:var(--text1);border-radius:8px;padding:10px 12px;font-size:14px">';
+  html += '<input type="text" id="rv-box-contact-'+id+'" placeholder="Contact person" style="background:var(--bg);border:1px solid var(--border);color:var(--text1);border-radius:8px;padding:10px 12px;font-size:14px">';
+  html += '<div style="display:flex;align-items:center;gap:8px"><span style="font-size:12px;color:var(--text3);white-space:nowrap">Pickup in</span><input type="number" id="rv-box-days-'+id+'" value="14" min="1" max="90" style="width:60px;background:var(--bg);border:1px solid var(--border);color:var(--text1);border-radius:8px;padding:10px 12px;font-size:14px;text-align:center"><span style="font-size:12px;color:var(--text3)">days</span></div>';
+  html += '<button onclick="placeRouteBox('+id+')" style="background:#059669;color:#fff;border:none;border-radius:8px;padding:10px 14px;font-size:14px;font-weight:600;cursor:pointer;min-height:44px">Place Box</button>';
+  html += '<div id="rv-box-st-'+id+'" style="font-size:12px;text-align:center;min-height:14px"></div>';
+  html += '</div></div>';
+
+  // Check In / Skip / Didn't Get To buttons
+  if (status === 'Pending') {{
+    html += '<div style="padding:16px;display:flex;gap:10px">';
+    html += '<button onclick="routeCheckIn('+id+')" style="flex:1;background:#ea580c;color:#fff;border:none;border-radius:10px;padding:14px;font-size:15px;font-weight:700;cursor:pointer">Check In</button>';
+    html += '<button onclick="routeSkip('+id+')" style="width:70px;background:var(--bg);color:var(--text2);border:1px solid var(--border);border-radius:10px;padding:14px;font-size:12px;font-weight:600;cursor:pointer">Skip</button>';
+    html += '<button onclick="routeNotReached('+id+')" style="width:70px;background:var(--bg);color:#ef4444;border:1px solid #ef444440;border-radius:10px;padding:14px;font-size:11px;font-weight:600;cursor:pointer;line-height:1.2">Didn\\\'t<br>Get To</button>';
+    html += '</div>';
+  }} else {{
+    html += '<div style="padding:16px"><button onclick="routeCheckInForm()" style="width:100%;background:#ea580c;color:#fff;border:none;border-radius:10px;padding:14px;font-size:15px;font-weight:700;cursor:pointer">Check In</button></div>';
+  }}
+
+  return html;
+}}
+
+// Tab switching (reuse from mobile map)
+function mSheetTab(el, panelId) {{
+  document.querySelectorAll('.m-tab').forEach(function(t){{t.classList.remove('active');}});
+  document.querySelectorAll('.m-panel').forEach(function(p){{p.classList.remove('active');}});
+  el.classList.add('active');
+  var panel = document.getElementById(panelId);
+  if (panel) panel.classList.add('active');
+}}
+
+// Load venue data for the route stop sheet
+async function loadRouteVenueData(stop) {{
+  // Get venue ID from the stop's venue link
+  var venueId = stop.venue_id;
+  if (!venueId) return;
+  // Load venue details, activities, events, boxes, companies in parallel
+  var results = await Promise.all([
+    fetchAll(_GGOR_VENUES), fetchAll(_GGOR_ACTS), fetchAll(_GGOR_BOXES),
+    fetchAll({T_COMPANIES})
+  ]);
+  var venues = results[0], acts = results[1], boxes = results[2], companies = results[3];
+  var v = venues.find(function(x){{return x.id === venueId;}});
+  if (!v) return;
+  var id = stop.stop_id;
+  var companyId = buildVenueCompanyMap(companies)[venueId];
+
+  // Fill Info tab
+  var infoEl = document.getElementById('rv-info-' + id);
+  if (infoEl && v) {{
+    var ih = '';
+    var phone = v['Phone'] || '';
+    var website = v['Website'] || '';
+    var fu = v['Follow-Up Date'] || '';
+    var notesRaw = v['Notes'] || '';
+    var _placeId = v['Google Place ID'] || '';
+    var gmUrl = v['Google Maps URL'] || (_placeId ? 'https://www.google.com/maps/place/?q=place_id:' + _placeId : '');
+    if (phone) ih += '<div style="margin-bottom:8px">\U0001f4de <a href="tel:'+esc(phone)+'" style="color:var(--text1)">'+esc(phone)+'</a></div>';
+    if (website) ih += '<div style="margin-bottom:8px">\U0001f310 <a href="'+esc(website)+'" target="_blank" style="color:#3b82f6">'+esc(website)+'</a></div>';
+    if (gmUrl) ih += '<div style="margin-bottom:8px"><a href="'+esc(gmUrl)+'" target="_blank" style="color:#3b82f6;font-size:12px">Google Maps \u2197</a></div>';
+    if (companyId) ih += '<div style="margin-bottom:8px"><a href="/company/'+companyId+'" style="color:#3b82f6;font-size:13px;font-weight:600">View full profile \u2192</a></div>';
+    ih += '<hr style="border:none;border-top:1px solid var(--border);margin:10px 0">';
+    ih += '<div class="m-sheet-lbl">Contact Status</div>';
+    var stOpts = IS_ADMIN ? ['Not Contacted','Contacted','In Discussion','Active Partner'] : ['Not Contacted','Contacted','In Discussion'];
+    var curSt = (v['Contact Status'] && v['Contact Status'].value) || v['Contact Status'] || '';
+    ih += '<select onchange="updateRouteVenueStatus('+venueId+',this.value)" style="width:100%;background:var(--bg);border:1px solid var(--border);color:var(--text1);border-radius:8px;padding:8px 10px;font-size:14px;margin-bottom:10px"' + (curSt==='Active Partner' && !IS_ADMIN ? ' disabled' : '') + '>';
+    stOpts.forEach(function(s) {{ ih += '<option'+(curSt===s?' selected':'')+'>'+s+'</option>'; }});
+    ih += '</select>';
+    // ── Follow-Up Date ──────────────────────────────────────────────
+    ih += '<div class="m-sheet-lbl">\U0001f5d3\ufe0f Follow-Up Date</div>';
+    ih += '<div style="display:flex;gap:6px;margin-bottom:4px">';
+    ih += '<input type="date" id="rv-fu-'+id+'" value="'+esc(fu)+'" style="flex:1;background:var(--bg);border:1px solid var(--border);color:var(--text1);border-radius:8px;padding:8px 10px;font-size:14px">';
+    ih += '<button onclick="mRouteSaveFollowUp()" style="background:#3b82f6;color:#fff;border:none;border-radius:8px;padding:8px 14px;font-size:13px;font-weight:600;cursor:pointer;min-width:60px;min-height:40px">Save</button>';
+    ih += '</div>';
+    ih += '<div id="rv-fu-st-'+id+'" style="font-size:11px;margin-bottom:10px;min-height:14px"></div>';
+    // ── Notes (read + add) ──────────────────────────────────────────
+    ih += '<div class="m-sheet-lbl">\U0001f4dd Notes</div>';
+    ih += '<div id="rv-notes-display-'+id+'" style="max-height:120px;overflow-y:auto;background:var(--card);border-radius:8px;padding:8px 10px;border:1px solid var(--border);font-size:13px;margin-bottom:6px">';
+    ih += renderNotesM(notesRaw) + '</div>';
+    ih += '<div style="display:flex;gap:6px">';
+    ih += '<input type="text" id="rv-note-in-'+id+'" placeholder="Add a note\u2026" style="flex:1;background:var(--bg);border:1px solid var(--border);color:var(--text1);border-radius:8px;padding:8px 10px;font-size:14px">';
+    ih += '<button onclick="mRouteAddNote()" style="background:#e94560;color:#fff;border:none;border-radius:8px;padding:8px 14px;font-size:13px;font-weight:600;cursor:pointer;min-width:50px;min-height:40px">Add</button>';
+    ih += '</div>';
+    ih += '<div id="rv-note-st-'+id+'" style="font-size:11px;margin-top:4px;min-height:14px"></div>';
+    infoEl.innerHTML = ih;
+  }}
+
+  // Fill Activity tab — log-new form + history
+  var actsEl = document.getElementById('rv-acts-' + id);
+  if (actsEl) {{
+    var myActs = acts.filter(function(a) {{
+      var lf = a['Business'];
+      return Array.isArray(lf) && lf.some(function(r){{return r.id===venueId;}});
+    }}).sort(function(a,b){{return (b['Date']||'').localeCompare(a['Date']||'');}}).slice(0,10);
+    // Log-new-activity form (collapsed by default)
+    var ah = '<div style="margin-bottom:12px">';
+    ah += '<button onclick="mRouteToggleLogForm()" style="width:100%;background:#ea580c20;color:#ea580c;border:1px solid #ea580c40;border-radius:8px;padding:10px;font-size:13px;font-weight:600;cursor:pointer;min-height:44px">+ Log new activity</button>';
+    ah += '<div id="rv-act-form-'+id+'" style="display:none;margin-top:10px;background:var(--card);border:1px solid var(--border);border-radius:8px;padding:10px">';
+    ah += '<select id="rv-act-type-'+id+'" style="width:100%;background:var(--bg);border:1px solid var(--border);color:var(--text1);border-radius:6px;padding:8px 10px;font-size:14px;margin-bottom:6px">';
+    ah += '<option value="">Type\u2026</option><option>Email</option><option>Phone</option><option>In-Person</option><option>Text</option><option>Other</option>';
+    ah += '</select>';
+    ah += '<select id="rv-act-out-'+id+'" style="width:100%;background:var(--bg);border:1px solid var(--border);color:var(--text1);border-radius:6px;padding:8px 10px;font-size:14px;margin-bottom:6px">';
+    ah += '<option value="">Outcome\u2026</option><option>Positive</option><option>Neutral</option><option>Negative</option><option>Left message</option><option>No answer</option>';
+    ah += '</select>';
+    ah += '<input type="text" id="rv-act-sum-'+id+'" placeholder="Brief summary\u2026" style="width:100%;background:var(--bg);border:1px solid var(--border);color:var(--text1);border-radius:6px;padding:8px 10px;font-size:14px;margin-bottom:8px;box-sizing:border-box">';
+    ah += '<button onclick="mRouteLogActivity()" style="width:100%;background:#ea580c;color:#fff;border:none;border-radius:6px;padding:10px;font-size:14px;font-weight:600;cursor:pointer;min-height:44px">Save Activity</button>';
+    ah += '<div id="rv-act-st-'+id+'" style="font-size:11px;margin-top:6px;text-align:center;min-height:14px"></div>';
+    ah += '</div></div>';
+    // History list — wrapped so the log-activity handler can prepend to it
+    var histHtml = myActs.length
+      ? myActs.map(function(a) {{
+          var t = (a['Type'] && a['Type'].value) || a['Type'] || '';
+          var o = (a['Outcome'] && a['Outcome'].value) || a['Outcome'] || '';
+          var d = a['Date'] || '';
+          return '<div style="padding:6px 0;border-bottom:1px solid var(--border);font-size:13px">'
+            + '<span style="font-weight:600">'+esc(t)+'</span>'
+            + (o ? ' \u2014 '+esc(o) : '')
+            + '<div style="font-size:11px;color:var(--text3)">'+esc(d)+'</div></div>';
+        }}).join('')
+      : '<div style="color:var(--text3)">No activities yet</div>';
+    actsEl.innerHTML = ah + '<div id="rv-acts-list-'+id+'">' + histHtml + '</div>';
+  }}
+
+  // Fill Events tab
+  var evtsEl = document.getElementById('rv-evts-' + id);
+  if (evtsEl) {{
+    var myEvts = acts.filter(function(a) {{
+      var lf = a['Business'];
+      var es = (a['Event Status'] && a['Event Status'].value) || a['Event Status'] || '';
+      return es && Array.isArray(lf) && lf.some(function(r){{return r.id===venueId;}});
+    }}).sort(function(a,b){{return (b['Date']||'').localeCompare(a['Date']||'');}}).slice(0,10);
+    var evColors = {{'Prospective':'#3b82f6','Approved':'#10b981','Scheduled':'#8b5cf6','Completed':'#64748b'}};
+    evtsEl.innerHTML = myEvts.length
+      ? myEvts.map(function(a) {{
+          var es = (a['Event Status'] && a['Event Status'].value) || '';
+          var t = (a['Type'] && a['Type'].value) || a['Type'] || '';
+          var ec = evColors[es] || '#64748b';
+          return '<div style="padding:6px 0;border-bottom:1px solid var(--border);font-size:13px">'
+            + '<span style="font-weight:600">'+esc(t)+'</span> '
+            + '<span style="font-size:10px;padding:2px 6px;border-radius:4px;background:'+ec+'22;color:'+ec+';font-weight:600">'+esc(es)+'</span>'
+            + '<div style="font-size:11px;color:var(--text3)">'+esc(a['Date']||'')+'</div></div>';
+        }}).join('')
+      : '<div style="color:var(--text3)">No events yet</div>';
+  }}
+
+  // Fill Boxes tab
+  var boxesEl = document.getElementById('rv-boxes-' + id);
+  if (boxesEl) {{
+    var myBoxes = boxes.filter(function(b) {{
+      var biz = b['Business'];
+      return Array.isArray(biz) && biz.some(function(r){{return r.id===venueId;}});
+    }});
+    boxesEl.innerHTML = myBoxes.length
+      ? myBoxes.map(function(b) {{
+          var st = (b['Status'] && b['Status'].value) || b['Status'] || '';
+          var sc = st === 'Active' ? '#059669' : '#475569';
+          var loc = b['Location Notes'] || '';
+          var pickupDays = parseInt(b['Pickup Days']) || 14;
+          var timerBadge = '';
+          var pickupBtn = '';
+          var daysEdit = '';
+          if (st === 'Active' && b['Date Placed']) {{
+            var age = -daysUntil(b['Date Placed']);
+            if (age >= pickupDays * 2) timerBadge = '<span style="background:#ef444420;color:#ef4444;border-radius:4px;padding:2px 6px;font-size:10px;font-weight:600;margin-left:6px">'+age+'d - Action needed</span>';
+            else if (age >= pickupDays) timerBadge = '<span style="background:#f59e0b20;color:#f59e0b;border-radius:4px;padding:2px 6px;font-size:10px;font-weight:600;margin-left:6px">'+age+'d - Follow up</span>';
+            else timerBadge = '<span style="background:#05966920;color:#059669;border-radius:4px;padding:2px 6px;font-size:10px;font-weight:600;margin-left:6px">'+age+'d</span>';
+            if (IS_ADMIN) {{
+              pickupBtn = '<button onclick="pickupBox('+b.id+')" style="margin-top:6px;background:#ea580c;color:#fff;border:none;border-radius:6px;padding:6px 14px;font-size:12px;font-weight:600;cursor:pointer;min-height:36px">Pick Up Box</button>';
+              daysEdit = '<div style="margin-top:6px;display:flex;align-items:center;gap:6px">'
+                + '<span style="font-size:11px;color:var(--text3)">Pickup in</span>'
+                + '<input type="number" value="'+pickupDays+'" min="1" max="90" id="rv-edit-days-'+b.id+'" style="width:50px;background:var(--bg);border:1px solid var(--border);color:var(--text1);border-radius:6px;padding:4px 6px;font-size:12px;text-align:center">'
+                + '<span style="font-size:11px;color:var(--text3)">days</span>'
+                + '<button onclick="updateBoxDays('+b.id+')" style="background:none;border:1px solid var(--border);color:#3b82f6;border-radius:6px;padding:3px 8px;font-size:11px;font-weight:600;cursor:pointer">Save</button>'
+                + '<span id="rv-days-st-'+b.id+'" style="font-size:10px;min-width:30px"></span>'
+                + '</div>';
+            }}
+          }}
+          return '<div style="padding:8px 0;border-bottom:1px solid var(--border);font-size:13px">'
+            + '<span style="background:'+sc+'20;color:'+sc+';border-radius:4px;padding:2px 6px;font-size:11px;font-weight:600">'+esc(st)+'</span>'
+            + timerBadge
+            + (b['Date Placed'] ? '<div style="font-size:12px;color:var(--text3);margin-top:3px">Placed '+esc(fmt(b['Date Placed']))+(loc?' \u2022 '+esc(loc):'')+'</div>' : '')
+            + pickupBtn
+            + daysEdit
+            + '</div>';
+        }}).join('')
+      : '<div style="color:var(--text3)">No massage boxes placed</div>';
+  }}
+}}
+
+function renderNotesM(text) {{
+  if (!text || !text.trim()) return '<div style="color:var(--text3);font-size:13px">No notes yet</div>';
+  return text.split('\\n---\\n').filter(function(e){{return e.trim();}}).map(function(entry) {{
+    var m = entry.match(/^\\[(\\d{{4}}-\\d{{2}}-\\d{{2}})\\] ([\\s\\S]*)$/);
+    if (m) return '<div style="padding:4px 0;border-bottom:1px solid var(--border)"><div style="font-size:10px;color:var(--text3)">'+m[1]+'</div><div style="font-size:13px">'+esc(m[2].trim())+'</div></div>';
+    return '<div style="padding:4px 0;font-size:13px">'+esc(entry.trim())+'</div>';
+  }}).join('');
+}}
+
+async function updateRouteVenueStatus(venueId, val) {{
+  await fetch(BR + '/api/database/rows/table/' + _GGOR_VENUES + '/' + venueId + '/?user_field_names=true', {{
+    method: 'PATCH', headers: {{'Authorization':'Token '+BT,'Content-Type':'application/json'}},
+    body: JSON.stringify({{'Contact Status': {{value: val}}}})
+  }});
+}}
+
+var _pendingCheckInStopId = null;
+
+function routeCheckIn(stopId) {{
+  _pendingCheckInStopId = stopId;
+  routeCheckInForm();
+}}
+
+function routeCheckInForm() {{
+  if (!_rCurrentStop) return;
+  closeRouteSheet();
+  s2Reset();
+  setTimeout(function() {{
+    var el;
+    el = document.getElementById('s2-event-name'); if (el) el.value = _rCurrentStop.name || '';
+    el = document.getElementById('s2-addr');        if (el) el.value = _rCurrentStop.address || '';
+    document.getElementById('gfr-form-s2').classList.add('open');
+  }}, 150);
+}}
+
+function _onFormSubmitSuccess() {{
+  if (_pendingCheckInStopId) {{
+    markRouteStop(_pendingCheckInStopId, 'Visited', null);
+    _pendingCheckInStopId = null;
+  }}
+}}
+
+function routeSkip(stopId) {{
+  var reason = prompt('Why are you skipping this stop?\\n(e.g. closed, no parking, ran out of time)');
+  if (reason === null) return;  // cancelled
+  if (!reason.trim()) {{ alert('Please provide a reason for skipping.'); return; }}
+  markRouteStop(stopId, 'Skipped', null, reason.trim());
+}}
+
+function routeNotReached(stopId) {{
+  var reason = prompt('Why couldn\\'t you get to this stop?\\n(e.g. too far, traffic, end of day)');
+  if (reason === null) return;  // cancelled
+  if (!reason.trim()) {{ alert('Please provide a reason.'); return; }}
+  markRouteStop(stopId, 'Not Reached', null, reason.trim());
+}}
+
+async function markRouteStop(stopId, status, callback, reason) {{
+  try {{
+    var payload = {{status: status}};
+    if (reason) payload.notes = reason;
+    // Attach current GPS coords if we have them and the status is Visited
+    if (status === 'Visited' && _userLat != null && _userLng != null) {{
+      payload.lat = _userLat;
+      payload.lng = _userLng;
+    }}
+    await fetch('/api/guerilla/routes/stops/' + stopId, {{
+      method: 'PATCH', headers: {{'Content-Type':'application/json'}},
+      body: JSON.stringify(payload)
+    }});
+
+    // Auto-pickup box if visiting a stop that has a pending box
+    if (status === 'Visited' && _routeData && _routeData.stops) {{
+      var thisStop = _routeData.stops.find(function(s){{ return s.stop_id === stopId; }});
+      if (thisStop && thisStop.pending_box && thisStop.pending_box.box_id) {{
+        try {{
+          await fetch('/api/guerilla/boxes/' + thisStop.pending_box.box_id + '/pickup', {{
+            method: 'PATCH', headers: {{'Content-Type':'application/json'}},
+          }});
+        }} catch(e) {{ /* non-fatal */ }}
+      }}
+    }}
+    var r = await fetch('/api/guerilla/routes/today');
+    _routeData = await r.json();
+    updateProgress();
+    // Update marker color
+    if (_rMarkers[stopId] && _rMap) {{
+      var color = _STATUS_COLORS[status] || '#4285f4';
+      var stop = (_routeData.stops||[]).find(function(s){{return s.stop_id===stopId;}});
+      var idx = stop ? stop.order : '?';
+      _rMarkers[stopId].setIcon({{path:google.maps.SymbolPath.CIRCLE,scale:14,fillColor:color,fillOpacity:1,strokeColor:'#fff',strokeWeight:2}});
+      _rMarkers[stopId].setLabel({{text:String(idx),color:'#fff',fontWeight:'700',fontSize:'12px'}});
+    }}
+    closeRouteSheet();
+    if (callback) callback();
+  }} catch(e) {{
+    alert('Could not update stop. Try again.');
+  }}
+}}
+
+function scheduleRouteEvent(formType) {{
+  if (!_rCurrentStop) return;
+  closeRouteSheet();
+  openGFRForm(formType);
+  var name = _rCurrentStop.name || '';
+  var addr = _rCurrentStop.address || '';
+  setTimeout(function() {{
+    ['s3','s4','s5'].forEach(function(p) {{
+      var c = document.getElementById(p + '-company'); if (c && !c.value) c.value = name;
+      var a = document.getElementById(p + '-addr');    if (a && !a.value) a.value = addr;
+    }});
+  }}, 350);
+}}
+
+async function placeRouteBox(stopId) {{
+  if (!_rCurrentStop) return;
+  var loc = document.getElementById('rv-box-loc-' + stopId).value.trim();
+  var contact = document.getElementById('rv-box-contact-' + stopId).value.trim();
+  var daysEl = document.getElementById('rv-box-days-' + stopId);
+  var pickupDays = daysEl ? parseInt(daysEl.value) || 14 : 14;
+  var st = document.getElementById('rv-box-st-' + stopId);
+  if (!loc) {{ alert('Please enter the box location.'); return; }}
+  if (st) st.textContent = 'Saving\u2026';
+  try {{
+    var r = await fetch('/api/guerilla/boxes', {{
+      method:'POST', headers:{{'Content-Type':'application/json'}},
+      body:JSON.stringify({{venue_id:_rCurrentStop.venue_id, location:loc, contact_person:contact, pickup_days:pickupDays}})
+    }});
+    var d = await r.json();
+    if (d.ok) {{
+      if (st) {{ st.style.color='#059669'; st.textContent='Box placed \u2713'; }}
+      document.getElementById('rv-box-loc-'+stopId).value='';
+      document.getElementById('rv-box-contact-'+stopId).value='';
+      setTimeout(function(){{ if(st) st.textContent=''; }}, 3000);
+    }} else {{ if (st) {{ st.style.color='#ef4444'; st.textContent='Error'; }} }}
+  }} catch(e) {{ if (st) {{ st.style.color='#ef4444'; st.textContent='Network error'; }} }}
+}}
+
+async function pickupBox(boxId) {{
+  if (!confirm('Pick up this massage box?')) return;
+  try {{
+    var r = await fetch('/api/guerilla/boxes/' + boxId + '/pickup', {{
+      method:'PATCH', headers:{{'Content-Type':'application/json'}},
+      body:'{{}}'
+    }});
+    var d = await r.json();
+    if (d.ok) {{
+      alert('Box picked up!');
+      if (_rCurrentStop) loadRouteVenueData(_rCurrentStop);
+    }}
+  }} catch(e) {{ alert('Error picking up box'); }}
+}}
+
+async function updateBoxDays(boxId) {{
+  var el = document.getElementById('rv-edit-days-' + boxId);
+  var st = document.getElementById('rv-days-st-' + boxId);
+  if (!el) return;
+  var days = parseInt(el.value);
+  if (!days || days < 1) {{ alert('Enter a valid number of days.'); return; }}
+  if (st) st.textContent = '\u2026';
+  try {{
+    var r = await fetch('/api/guerilla/boxes/' + boxId + '/days', {{
+      method:'PATCH', headers:{{'Content-Type':'application/json'}},
+      body:JSON.stringify({{pickup_days: days}})
+    }});
+    var d = await r.json();
+    if (d.ok) {{
+      if (st) {{ st.style.color='#059669'; st.textContent='\u2713'; }}
+      setTimeout(function(){{ if(st) st.textContent=''; }}, 2000);
+    }} else {{ if (st) {{ st.style.color='#ef4444'; st.textContent='Error'; }} }}
+  }} catch(e) {{ if (st) {{ st.style.color='#ef4444'; st.textContent='Error'; }} }}
+}}
+
+// ── Field-rep quick-edit handlers (Contact.* backed) ───────────────────────
+async function mRouteSaveFollowUp() {{
+  var stop = _rCurrentStop; if (!stop || !stop.venue_id) return;
+  var venueId = stop.venue_id, id = stop.stop_id;
+  var inEl = document.getElementById('rv-fu-' + id);
+  var stEl = document.getElementById('rv-fu-st-' + id);
+  var val = inEl ? (inEl.value || null) : null;
+  if (stEl) {{ stEl.textContent = 'Saving\u2026'; stEl.style.color = 'var(--text3)'; }}
+  var res = await Contact.saveFollowUp('gorilla', venueId, val);
+  if (stEl) {{
+    stEl.textContent = res.ok ? '\u2713 Saved' : '\u2717 Failed';
+    stEl.style.color = res.ok ? '#059669' : '#ef4444';
+    setTimeout(function() {{ if (stEl) stEl.textContent = ''; }}, 2000);
+  }}
+}}
+
+async function mRouteAddNote() {{
+  var stop = _rCurrentStop; if (!stop || !stop.venue_id) return;
+  var venueId = stop.venue_id, id = stop.stop_id;
+  var inEl = document.getElementById('rv-note-in-' + id);
+  var text = (inEl ? inEl.value : '').trim();
+  if (!text) return;
+  var stEl = document.getElementById('rv-note-st-' + id);
+  if (stEl) {{ stEl.textContent = 'Saving\u2026'; stEl.style.color = 'var(--text3)'; }}
+  try {{
+    var v = await Contact.fetchVenue('gorilla', venueId);
+    var existing = (v && v['Notes']) || '';
+    var res = await Contact.addNote('gorilla', venueId, existing, text);
+    if (stEl) {{
+      stEl.textContent = res.ok ? '\u2713 Added' : '\u2717 Failed';
+      stEl.style.color = res.ok ? '#059669' : '#ef4444';
+      setTimeout(function() {{ if (stEl) stEl.textContent = ''; }}, 2000);
+    }}
+    if (res.ok) {{
+      if (inEl) inEl.value = '';
+      var displayEl = document.getElementById('rv-notes-display-' + id);
+      if (displayEl) displayEl.innerHTML = renderNotesM(res.newNotes);
+    }}
+  }} catch(e) {{
+    if (stEl) {{ stEl.textContent = 'Error'; stEl.style.color = '#ef4444'; }}
+  }}
+}}
+
+async function mRouteLogActivity() {{
+  var stop = _rCurrentStop; if (!stop || !stop.venue_id) return;
+  var venueId = stop.venue_id, id = stop.stop_id;
+  var typeEl = document.getElementById('rv-act-type-' + id);
+  var outEl  = document.getElementById('rv-act-out-' + id);
+  var sumEl  = document.getElementById('rv-act-sum-' + id);
+  var stEl   = document.getElementById('rv-act-st-' + id);
+  var formEl = document.getElementById('rv-act-form-' + id);
+  var listEl = document.getElementById('rv-acts-list-' + id);
+  var type    = typeEl ? typeEl.value : '';
+  var outcome = outEl  ? outEl.value  : '';
+  var summary = sumEl  ? sumEl.value.trim()  : '';
+  if (!type) {{ if (stEl) {{ stEl.textContent = 'Pick a type first'; stEl.style.color = '#ef4444'; }} return; }}
+  if (stEl) {{ stEl.textContent = 'Saving\u2026'; stEl.style.color = 'var(--text3)'; }}
+  var res = await Contact.logActivity('gorilla', venueId, {{type: type, outcome: outcome, summary: summary}});
+  if (stEl) {{
+    stEl.textContent = res.ok ? '\u2713 Logged' : '\u2717 Failed';
+    stEl.style.color = res.ok ? '#059669' : '#ef4444';
+    setTimeout(function() {{ if (stEl) stEl.textContent = ''; }}, 2000);
+  }}
+  if (res.ok) {{
+    if (typeEl) typeEl.value = '';
+    if (outEl) outEl.value = '';
+    if (sumEl) sumEl.value = '';
+    if (formEl) formEl.style.display = 'none';
+    if (listEl) {{
+      var d = (res.row && res.row['Date']) || new Date().toISOString().split('T')[0];
+      var html = '<div style="padding:6px 0;border-bottom:1px solid var(--border);font-size:13px">'
+        + '<span style="font-weight:600">'+esc(type)+'</span>'
+        + (outcome ? ' \u2014 '+esc(outcome) : '')
+        + (summary ? '<div style="font-size:12px;color:var(--text2);margin-top:2px">'+esc(summary)+'</div>' : '')
+        + '<div style="font-size:11px;color:var(--text3)">'+esc(d)+'</div></div>';
+      if (listEl.innerHTML.indexOf('No activities yet') !== -1) listEl.innerHTML = '';
+      listEl.innerHTML = html + listEl.innerHTML;
+    }}
+  }}
+}}
+
+function mRouteToggleLogForm() {{
+  var stop = _rCurrentStop; if (!stop) return;
+  var el = document.getElementById('rv-act-form-' + stop.stop_id);
+  if (el) el.style.display = el.style.display === 'none' ? 'block' : 'none';
+}}
+
+loadRoute();
+"""
+    admin = _is_admin(user or {})
+    script_js = (
+        f"const GFR_USER={repr(user_name)};\n"
+        f"const TOOL = {{venuesT: {T_GOR_VENUES}}};\n"
+        f"const IS_ADMIN = {'true' if admin else 'false'};\n"
+        f"const _TOOL_KEY = 'gorilla';\n"
+        + contact_actions_js() + "\n"
+        + route_js
+    )
+    return _mobile_page('m_route', 'My Route', body, script_js, br, bt, user=user, wrap_cls='map-mode',
+                         extra_html=GFR_EXTRA_HTML, extra_js=GFR_EXTRA_JS)
