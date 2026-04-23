@@ -111,8 +111,6 @@ def _build_mobile_drawer(active: str, user: dict) -> str:
         + link('m_directory',  '📇 All Companies',      '/directory',     grp=True)
         + (link('m_recent',    '⏱️ Recent Activity',  '/recent',        grp=True) if admin else '')
         + sep
-        + link('m_outreach_map','🗺️ Route Map',         '/outreach/map')
-        + sep
         + '<a href="https://hub.reformchiropractic.app">💻 Full Hub</a>'
         '<a href="/logout" style="color:var(--text3)">Sign Out</a>'
     )

@@ -568,6 +568,89 @@ async def update_venue(request: Request, br: str, bt: str, user: dict,
 # ─────────────────────────────────────────────────────────────────────────────
 # Route endpoints
 # ─────────────────────────────────────────────────────────────────────────────
+async def _build_route_response(route: dict, cached_rows: CachedRowsFn) -> dict:
+    """Shared enrichment: take a T_GOR_ROUTES row and return the
+    {route, stops} payload with venue details and pending-box hints.
+    Used by both routes_today and route_detail."""
+    route_id = route.get("id")
+    stops_all = await cached_rows(T_GOR_ROUTE_STOPS)
+    stops = [s for s in stops_all if any(
+        (isinstance(v, dict) and v.get("id") == route_id) or v == route_id
+        for v in (s.get("Route") or [])
+    )]
+    stops.sort(key=lambda s: s.get("Stop Order") or 999)
+    venues = await cached_rows(T_GOR_VENUES)
+    venue_map = {v["id"]: v for v in venues}
+    boxes = await cached_rows(T_GOR_BOXES)
+    today_d = _date.today()
+    pending_box_by_venue = {}
+    for b in boxes:
+        b_status = b.get("Status") or ""
+        if isinstance(b_status, dict): b_status = b_status.get("value", "")
+        if b_status != "Active":
+            continue
+        placed = b.get("Date Placed")
+        if not placed:
+            continue
+        try:
+            placed_d = _date.fromisoformat(str(placed)[:10])
+            age = (today_d - placed_d).days
+        except Exception:
+            continue
+        pickup_days = b.get("Pickup Days")
+        try:
+            pickup_days = int(pickup_days) if pickup_days else 14
+        except Exception:
+            pickup_days = 14
+        if age < pickup_days:
+            continue
+        biz = b.get("Business") or []
+        v_id = None
+        for v in biz:
+            if isinstance(v, dict): v_id = v.get("id"); break
+            v_id = v; break
+        if v_id:
+            existing = pending_box_by_venue.get(v_id)
+            if not existing or age > existing["age"]:
+                pending_box_by_venue[v_id] = {
+                    "box_id": b.get("id"), "age": age,
+                    "overdue_by": age - pickup_days,
+                    "location": b.get("Location Notes") or "",
+                }
+    stop_list = []
+    for s in stops:
+        venue_id = None
+        for v in (s.get("Venue") or []):
+            if isinstance(v, dict): venue_id = v.get("id"); break
+            venue_id = v; break
+        venue = venue_map.get(venue_id, {}) if venue_id else {}
+        status = s.get("Status") or ""
+        if isinstance(status, dict): status = status.get("value", "Pending")
+        pending_box = pending_box_by_venue.get(venue_id) if venue_id else None
+        stop_list.append({
+            "stop_id":     s.get("id"),
+            "venue_id":    venue_id,
+            "name":        venue.get("Name") or "",
+            "address":     venue.get("Address") or "",
+            "lat":         venue.get("Latitude"),
+            "lng":         venue.get("Longitude"),
+            "status":      status or "Pending",
+            "order":       s.get("Stop Order") or 0,
+            "notes":       s.get("Notes") or "",
+            "pending_box": pending_box,
+        })
+    route_status = route.get("Status") or ""
+    if isinstance(route_status, dict): route_status = route_status.get("value", "")
+    return {
+        "route": {"id": route_id,
+                  "name": route.get("Name") or route.get("Route Name") or "Route",
+                  "status": route_status,
+                  "date": (route.get("Date") or "")[:10],
+                  "assigned_to": (route.get("Assigned To") or "").strip()},
+        "stops": stop_list,
+    }
+
+
 async def routes_today(request: Request, br: str, bt: str, user: dict,
                        cached_rows: CachedRowsFn) -> JSONResponse:
     """Return the caller's active/draft route for today (or most recent fallback)
@@ -600,81 +683,27 @@ async def routes_today(request: Request, br: str, bt: str, user: dict,
                 route = candidates[0]
         if not route:
             return JSONResponse({"route": None, "stops": []})
-        route_id = route.get("id")
-        stops_all = await cached_rows(T_GOR_ROUTE_STOPS)
-        stops = [s for s in stops_all if any(
-            (isinstance(v, dict) and v.get("id") == route_id) or v == route_id
-            for v in (s.get("Route") or [])
-        )]
-        stops.sort(key=lambda s: s.get("Stop Order") or 999)
-        venues = await cached_rows(T_GOR_VENUES)
-        venue_map = {v["id"]: v for v in venues}
-        boxes = await cached_rows(T_GOR_BOXES)
-        today_d = _date.today()
-        pending_box_by_venue = {}
-        for b in boxes:
-            b_status = b.get("Status") or ""
-            if isinstance(b_status, dict): b_status = b_status.get("value", "")
-            if b_status != "Active":
-                continue
-            placed = b.get("Date Placed")
-            if not placed:
-                continue
-            try:
-                placed_d = _date.fromisoformat(str(placed)[:10])
-                age = (today_d - placed_d).days
-            except Exception:
-                continue
-            pickup_days = b.get("Pickup Days")
-            try:
-                pickup_days = int(pickup_days) if pickup_days else 14
-            except Exception:
-                pickup_days = 14
-            if age < pickup_days:
-                continue
-            biz = b.get("Business") or []
-            v_id = None
-            for v in biz:
-                if isinstance(v, dict): v_id = v.get("id"); break
-                v_id = v; break
-            if v_id:
-                existing = pending_box_by_venue.get(v_id)
-                if not existing or age > existing["age"]:
-                    pending_box_by_venue[v_id] = {
-                        "box_id": b.get("id"), "age": age,
-                        "overdue_by": age - pickup_days,
-                        "location": b.get("Location Notes") or "",
-                    }
-        stop_list = []
-        for s in stops:
-            venue_id = None
-            for v in (s.get("Venue") or []):
-                if isinstance(v, dict): venue_id = v.get("id"); break
-                venue_id = v; break
-            venue = venue_map.get(venue_id, {}) if venue_id else {}
-            status = s.get("Status") or ""
-            if isinstance(status, dict): status = status.get("value", "Pending")
-            pending_box = pending_box_by_venue.get(venue_id) if venue_id else None
-            stop_list.append({
-                "stop_id":     s.get("id"),
-                "venue_id":    venue_id,
-                "name":        venue.get("Name") or "",
-                "address":     venue.get("Address") or "",
-                "lat":         venue.get("Latitude"),
-                "lng":         venue.get("Longitude"),
-                "status":      status or "Pending",
-                "order":       s.get("Stop Order") or 0,
-                "notes":       s.get("Notes") or "",
-                "pending_box": pending_box,
-            })
-        route_status = route.get("Status") or ""
-        if isinstance(route_status, dict): route_status = route_status.get("value", "")
-        return JSONResponse({
-            "route": {"id": route_id,
-                      "name": route.get("Name") or route.get("Route Name") or "Route",
-                      "status": route_status},
-            "stops": stop_list,
-        })
+        return JSONResponse(await _build_route_response(route, cached_rows))
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+async def route_detail(request: Request, br: str, bt: str, user: dict,
+                       route_id: int, cached_rows: CachedRowsFn) -> JSONResponse:
+    """Return a specific route by id with enriched stops. Admin sees any route;
+    field reps can only view routes assigned to them."""
+    if not T_GOR_ROUTES or not T_GOR_ROUTE_STOPS:
+        return JSONResponse({"error": "routes not configured"}, status_code=503)
+    user_email = (user.get("email") or "").strip().lower()
+    try:
+        routes = await cached_rows(T_GOR_ROUTES)
+        route = next((r for r in routes if r.get("id") == route_id), None)
+        if not route:
+            return JSONResponse({"error": "route not found"}, status_code=404)
+        assignee = (route.get("Assigned To") or "").strip().lower()
+        if not _is_admin(user) and assignee != user_email:
+            return JSONResponse({"error": "not your route"}, status_code=403)
+        return JSONResponse(await _build_route_response(route, cached_rows))
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=500)
 

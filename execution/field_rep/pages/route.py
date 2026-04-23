@@ -10,13 +10,18 @@ from hub.guerilla import GFR_EXTRA_HTML, GFR_EXTRA_JS
 from hub.contact_detail import contact_actions_js
 
 
-def _mobile_route_page(br: str, bt: str, user: dict = None) -> str:
+def _mobile_route_page(br: str, bt: str, user: dict = None,
+                       route_id: int = None) -> str:
+    """Renders the full-screen route map. If route_id is given, loads that
+    specific route; otherwise loads the caller's active/draft route for today."""
     import datetime
     gk = os.environ.get("GOOGLE_MAPS_API_KEY", "")
     user = user or {}
     today_str = datetime.date.today().isoformat()
     user_email = user.get('email', '')
     user_name = user.get('name', '')
+    # Endpoint is chosen server-side so the same JS handles both paths.
+    route_endpoint = f"/api/guerilla/routes/{int(route_id)}" if route_id else "/api/guerilla/routes/today"
     body = (
         # Full-screen map for route
         '<div class="m-map-wrap" id="rmap"></div>'
@@ -51,6 +56,7 @@ const _GGOR_BOXES  = {T_GOR_BOXES};
 const _GOFF_LAT = 33.9478, _GOFF_LNG = -118.1335;
 const _STATUS_COLORS = {{'Pending':'#4285f4','Visited':'#059669','Skipped':'#f97316','Not Reached':'#ef4444'}};
 var _routeData = null, _rMap = null, _rMarkers = {{}}, _rPolyline = null, _rOfficeMarker = null;
+var _rDirections = null;  // DirectionsRenderer for street-following polyline
 var _rCurrentStop = null;  // currently selected stop (full venue data)
 var _userLat = null, _userLng = null, _userMarker = null;
 var _allBoxesCache = null;  // cached boxes for pickup badges
@@ -82,7 +88,7 @@ async function loadRoute() {{
   initRouteMap();
   try {{
     var [routeResp, boxes] = await Promise.all([
-      fetch('/api/guerilla/routes/today').then(function(r){{return r.json();}}),
+      fetch({route_endpoint!r}).then(function(r){{return r.json();}}),
       fetchAll(_GGOR_BOXES)
     ]);
     _routeData = routeResp;
@@ -152,11 +158,12 @@ function initRouteMap() {{
 
 function renderRouteStops() {{
   if (!_rMap || !_routeData || !_routeData.route) return;
-  // Clear existing markers/polyline
+  // Clear existing markers/polyline/directions
   Object.values(_rMarkers).forEach(function(m){{ m.setMap(null); }});
   _rMarkers = {{}};
   if (_rOfficeMarker) {{ _rOfficeMarker.setMap(null); _rOfficeMarker = null; }}
   if (_rPolyline) {{ _rPolyline.setMap(null); _rPolyline = null; }}
+  if (_rDirections) {{ _rDirections.setMap(null); _rDirections = null; }}
   var stops = _routeData.stops || [];
   var bounds = new google.maps.LatLngBounds();
   var pathCoords = [];
@@ -190,15 +197,55 @@ function renderRouteStops() {{
     _rMarkers[stop.stop_id] = marker;
   }});
   if (pathCoords.length > 1) {{
+    _drawDirectionsOrFallback(pathCoords);
+  }}
+  if (pathCoords.length) {{
+    _rMap.fitBounds(bounds, {{top:70,bottom:80,left:20,right:20}});
+  }}
+}}
+
+// Draw a road-following polyline via the Directions API. Falls back to a
+// simple straight-line Polyline on error or when we exceed Google's
+// 25-waypoint cap (origin + destination + up to 23 intermediate waypoints).
+function _drawDirectionsOrFallback(pathCoords) {{
+  var origin = pathCoords[0];
+  var destination = pathCoords[pathCoords.length - 1];
+  var mid = pathCoords.slice(1, -1);
+  var straightLine = function() {{
     _rPolyline = new google.maps.Polyline({{
       path: pathCoords, geodesic: true,
       strokeColor: '#ea580c', strokeOpacity: 0.7, strokeWeight: 3,
       map: _rMap
     }});
+  }};
+  if (mid.length > 23) {{
+    console.log('[route] >23 waypoints; falling back to straight-line polyline');
+    straightLine();
+    return;
   }}
-  if (pathCoords.length) {{
-    _rMap.fitBounds(bounds, {{top:70,bottom:80,left:20,right:20}});
-  }}
+  var waypoints = mid.map(function(c) {{
+    return {{location: new google.maps.LatLng(c.lat, c.lng), stopover: true}};
+  }});
+  var ds = new google.maps.DirectionsService();
+  _rDirections = new google.maps.DirectionsRenderer({{
+    map: _rMap,
+    suppressMarkers: true,    // we already draw numbered markers
+    preserveViewport: true,   // fitBounds will run on our markers below
+    polylineOptions: {{strokeColor: '#ea580c', strokeOpacity: 0.8, strokeWeight: 4}},
+  }});
+  ds.route({{
+    origin: origin, destination: destination, waypoints: waypoints,
+    travelMode: google.maps.TravelMode.DRIVING,
+    optimizeWaypoints: false,  // respect admin's stop order
+  }}, function(res, status) {{
+    if (status === 'OK') {{
+      _rDirections.setDirections(res);
+    }} else {{
+      console.log('[route] directions failed (' + status + '); falling back to straight-line');
+      if (_rDirections) {{ _rDirections.setMap(null); _rDirections = null; }}
+      straightLine();
+    }}
+  }});
 }}
 
 function closeRouteSheet() {{
@@ -594,7 +641,7 @@ async function markRouteStop(stopId, status, callback, reason) {{
         }} catch(e) {{ /* non-fatal */ }}
       }}
     }}
-    var r = await fetch('/api/guerilla/routes/today');
+    var r = await fetch({route_endpoint!r});
     _routeData = await r.json();
     updateProgress();
     // Update marker color

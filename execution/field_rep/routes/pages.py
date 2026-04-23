@@ -63,6 +63,16 @@ async def route_detail(request: Request):
     return HTMLResponse(_mobile_route_page(br, bt, user=user))
 
 
+@router.get("/routes/{route_id:int}", response_class=HTMLResponse)
+async def route_detail_by_id(route_id: int, request: Request):
+    """Map view for a specific route. Field-rep ownership + admin bypass are
+    enforced by the /api/guerilla/routes/{route_id} endpoint the page hits."""
+    user, br, bt = await _guard(request)
+    if not user:
+        return RedirectResponse(url="/login")
+    return HTMLResponse(_mobile_route_page(br, bt, user=user, route_id=route_id))
+
+
 @router.get("/lead", response_class=HTMLResponse)
 async def lead_capture(request: Request):
     user, br, bt = await _guard(request)

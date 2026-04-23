@@ -272,6 +272,15 @@ async def routes_today(request: Request):
     return await guerilla_api.routes_today(request, br, bt, session, _cached_rows)
 
 
+@router.get("/api/guerilla/routes/{route_id}")
+async def route_detail(route_id: int, request: Request):
+    session = await get_session(request)
+    if not session:
+        return JSONResponse({"error": "unauthenticated"}, status_code=401)
+    br, bt = _env()
+    return await guerilla_api.route_detail(request, br, bt, session, route_id, _cached_rows)
+
+
 @router.patch("/api/guerilla/routes/stops/{stop_id}")
 async def update_route_stop(request: Request, stop_id: int):
     session = await get_session(request)

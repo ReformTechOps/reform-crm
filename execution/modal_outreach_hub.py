@@ -2853,6 +2853,15 @@ def web():
         return await guerilla_api.routes_today(request, env["br"], env["bt"], session,
                                                _hub_cached_rows)
 
+    @fapp.get("/api/guerilla/routes/{route_id}")
+    async def route_detail(request: Request, route_id: int):
+        session = _get_session(request)
+        if not session:
+            return JSONResponse({"error": "unauthenticated"}, status_code=401)
+        env = _env()
+        return await guerilla_api.route_detail(request, env["br"], env["bt"], session,
+                                               route_id, _hub_cached_rows)
+
     @fapp.patch("/api/guerilla/routes/stops/{stop_id}")
     async def update_route_stop(request: Request, stop_id: int):
         session = _get_session(request)
@@ -5640,6 +5649,19 @@ if __name__ == "__main__":
             })
         except Exception as e:
             return JSONResponse({"error": str(e)}, status_code=500)
+
+    @local_app.get("/api/guerilla/routes/{route_id}")
+    async def _gorilla_route_detail(route_id: int, request: Request):
+        session = _get_session(request)
+        if not session:
+            return JSONResponse({"error": "unauthenticated"}, status_code=401)
+        env = _env()
+
+        async def _local_cached_rows(tid: int) -> list:
+            return await _cached_table(tid, env["br"], env["bt"])
+
+        return await guerilla_api.route_detail(request, env["br"], env["bt"],
+                                               session, route_id, _local_cached_rows)
 
     @local_app.patch("/api/guerilla/routes/stops/{stop_id}")
     async def _gorilla_route_stop_patch(stop_id: int, request: Request):

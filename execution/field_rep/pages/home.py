@@ -339,7 +339,7 @@ async function load() {{
     var total = myStops.length;
     var rpct = total ? Math.round(v/total*100) : 0;
 
-    var h = '<div style="background:var(--card);border:1px solid var(--border);border-radius:10px;padding:14px;margin-bottom:10px">';
+    var h = '<a href="/routes/'+rid+'" style="display:block;background:var(--card);border:1px solid var(--border);border-radius:10px;padding:14px;margin-bottom:10px;text-decoration:none;color:inherit">';
     h += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">';
     h += '<div style="font-size:14px;font-weight:700">'+esc(row['Name']||'(unnamed)')+'</div>';
     h += '<span style="font-size:10px;background:'+sc+'20;color:'+sc+';border-radius:4px;padding:2px 7px;font-weight:600">'+esc(status)+'</span>';
@@ -354,32 +354,10 @@ async function load() {{
     h += '</div>';
     // Progress bar
     if(total) {{
-      h += '<div style="height:4px;background:var(--border);border-radius:2px;overflow:hidden;margin-bottom:6px">';
+      h += '<div style="height:4px;background:var(--border);border-radius:2px;overflow:hidden">';
       h += '<div style="height:100%;width:'+rpct+'%;background:#059669;border-radius:2px"></div></div>';
     }}
-    // Expand toggle
-    if(total) {{
-      h += '<button onclick="toggleStops(this,'+rid+')" style="font-size:11px;color:#3b82f6;background:none;border:none;font-weight:600;cursor:pointer;padding:0">Show stops \u25be</button>';
-      h += '<div id="ms-'+rid+'" style="display:none;border-top:1px solid var(--border);padding-top:8px;margin-top:8px">';
-      myStops.forEach(function(s, i) {{
-        var ss = sv(s['Status'])||'Pending';
-        var sColor = ss==='Visited'?'#059669':ss==='Skipped'?'#f97316':ss==='Not Reached'?'#ef4444':'#94a3b8';
-        var vl = s['Venue'];
-        var vId = Array.isArray(vl)&&vl.length ? vl[0].id : null;
-        var vName = vId&&venueMap[vId] ? (venueMap[vId]['Name']||'(unnamed)') : (s['Name']||'(unknown)');
-        var coId = vId ? venueCoMap[vId] : null;
-        var nameHtml = coId
-          ? '<a href="/company/'+coId+'" style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text);text-decoration:none">'+esc(vName)+'</a>'
-          : '<span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+esc(vName)+'</span>';
-        h += '<div style="display:flex;align-items:center;gap:8px;padding:4px 0;font-size:12px">';
-        h += '<div style="width:20px;height:20px;border-radius:50%;background:'+sColor+';color:#fff;display:flex;align-items:center;justify-content:center;font-size:9px;font-weight:700;flex-shrink:0">'+(i+1)+'</div>';
-        h += nameHtml;
-        h += '<span style="font-size:10px;color:'+sColor+';font-weight:600;flex-shrink:0">'+esc(ss)+'</span>';
-        h += '</div>';
-      }});
-      h += '</div>';
-    }}
-    h += '</div>';
+    h += '</a>';
     return h;
   }}
 
@@ -396,17 +374,6 @@ async function load() {{
     }}
   }}
   stampRefresh();
-}}
-
-function toggleStops(btn, rid) {{
-  var el = document.getElementById('ms-'+rid);
-  if (el.style.display === 'none') {{
-    el.style.display = 'block';
-    btn.innerHTML = 'Hide stops \u25b4';
-  }} else {{
-    el.style.display = 'none';
-    btn.innerHTML = 'Show stops \u25be';
-  }}
 }}
 
 function togglePast() {{
