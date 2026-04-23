@@ -394,22 +394,19 @@ async def guerilla_log(request: Request, br: str, bt: str, user: dict,
             ev_fields["Indoor Outdoor"] = {"value": fields["indoor_outdoor"]}
         if venue_id:
             ev_fields["Business"] = [{"id": venue_id}]
-        # NOTE: `client` here refers to the outer `async with` block which has
-        # already exited. This `post` call therefore raises RuntimeError (client
-        # closed) and is swallowed by the surrounding try/except. This matches
-        # the hub's original behavior — T_EVENTS auto-creation has been silently
-        # failing in production. Left bug-for-bug parity during the refactor;
-        # track as a separate fix.
         try:
-            er = await client.post(
-                f"{br}/api/database/rows/table/{T_EVENTS}/?user_field_names=true",
-                headers=br_headers,
-                json=ev_fields,
-            )
+            async with httpx.AsyncClient(timeout=60) as ev_client:
+                er = await ev_client.post(
+                    f"{br}/api/database/rows/table/{T_EVENTS}/?user_field_names=true",
+                    headers=br_headers,
+                    json=ev_fields,
+                )
             if er.status_code in (200, 201):
                 event_id = er.json().get("id")
-        except Exception:
-            pass
+            else:
+                print(f"[guerilla_log] T_EVENTS create failed ({er.status_code}): {er.text}")
+        except Exception as e:
+            print(f"[guerilla_log] T_EVENTS create error: {e}")
 
     return JSONResponse({"ok": True, "activity_id": activity_id, "event_id": event_id})
 
