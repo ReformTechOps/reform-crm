@@ -34,7 +34,7 @@ def _mobile_route_page(br: str, bt: str, user: dict = None,
         '<div id="rt-progress" style="position:fixed;top:0;left:0;right:0;z-index:110;background:var(--bg2);padding:10px 16px;border-bottom:1px solid var(--border);display:none">'
         '<div style="display:flex;justify-content:space-between;align-items:center">'
         '<div id="rt-name" style="font-size:14px;font-weight:700"></div>'
-        '<a href="/" style="font-size:12px;color:var(--text3);text-decoration:none">\u2190 Home</a>'
+        '<a href="/routes" style="font-size:12px;color:var(--text3);text-decoration:none">\u2190 Routes</a>'
         '</div>'
         '<div id="rt-count" style="font-size:12px;color:var(--text3);margin-top:3px"></div>'
         '<div style="margin-top:6px;background:var(--border);border-radius:4px;height:5px;overflow:hidden">'
