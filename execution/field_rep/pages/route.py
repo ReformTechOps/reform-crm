@@ -628,6 +628,33 @@ async function loadRouteVenueData(stop) {{
     ih += '<button onclick="mRouteAddNote()" style="background:#e94560;color:#fff;border:none;border-radius:8px;padding:8px 14px;font-size:13px;font-weight:600;cursor:pointer;min-width:50px;min-height:40px">Add</button>';
     ih += '</div>';
     ih += '<div id="rv-note-st-'+id+'" style="font-size:11px;margin-top:4px;min-height:14px"></div>';
+    // ── Visit History (from T_GOR_ACTS) ─────────────────────────────
+    var myActs = acts.filter(function(a) {{
+      var lf = a['Business'];
+      return Array.isArray(lf) && lf.some(function(r){{return r.id===venueId;}});
+    }}).sort(function(a,b) {{
+      return (b['Date']||'').localeCompare(a['Date']||'');
+    }}).slice(0, 10);
+    ih += '<hr style="border:none;border-top:1px solid var(--border);margin:14px 0 10px">';
+    ih += '<div class="m-sheet-lbl">Visit History</div>';
+    if (myActs.length) {{
+      ih += myActs.map(function(a) {{
+        var t = (a['Type'] && a['Type'].value) || a['Type'] || '';
+        var o = (a['Outcome'] && a['Outcome'].value) || a['Outcome'] || '';
+        var d = a['Date'] || '';
+        var sm = a['Summary'] || '';
+        var parts = [];
+        if (t) parts.push('<span style="font-weight:600">'+esc(t)+'</span>');
+        if (o) parts.push(esc(o));
+        return '<div style="padding:6px 0;border-bottom:1px solid var(--border);font-size:13px">'
+             + parts.join(' — ')
+             + (sm ? '<div style="font-size:12px;color:var(--text2);margin-top:2px">'+esc(sm)+'</div>' : '')
+             + (d ? '<div style="font-size:11px;color:var(--text3);margin-top:2px">'+esc(d)+'</div>' : '')
+             + '</div>';
+      }}).join('');
+    }} else {{
+      ih += '<div style="color:var(--text3);font-size:13px;padding:4px 0">No visits logged yet.</div>';
+    }}
     infoEl.innerHTML = ih;
   }}
 
