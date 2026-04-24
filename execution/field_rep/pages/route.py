@@ -4,7 +4,7 @@ import os
 
 from hub.shared import (
     _mobile_page, _is_admin,
-    T_GOR_VENUES, T_GOR_ACTS, T_GOR_BOXES, T_COMPANIES, T_EVENTS,
+    T_GOR_VENUES, T_GOR_ACTS, T_GOR_BOXES, T_COMPANIES, T_EVENTS, T_LEADS,
 )
 from hub.guerilla import GFR_EXTRA_HTML, GFR_EXTRA_JS
 from hub.contact_detail import contact_actions_js
@@ -508,7 +508,7 @@ function renderRouteSheet(stop) {{
   // Tab bar
   html += '<div class="m-tabs">';
   html += '<div class="m-tab active" onclick="mSheetTab(this,\\'rp-info-'+id+'\\')">Info</div>';
-  html += '<div class="m-tab" onclick="mSheetTab(this,\\'rp-acts-'+id+'\\')">Activity</div>';
+  html += '<div class="m-tab" onclick="mSheetTab(this,\\'rp-leads-'+id+'\\')">Leads</div>';
   html += '<div class="m-tab" onclick="mSheetTab(this,\\'rp-evts-'+id+'\\')">Events</div>';
   html += '<div class="m-tab" onclick="mSheetTab(this,\\'rp-boxes-'+id+'\\')">Boxes</div>';
   html += '</div>';
@@ -522,9 +522,9 @@ function renderRouteSheet(stop) {{
   html += '<div id="rv-info-'+id+'" style="color:var(--text3);font-size:13px">Loading venue details\u2026</div>';
   html += '</div>';
 
-  // Activity tab
-  html += '<div class="m-panel" id="rp-acts-'+id+'" style="padding:12px 16px">';
-  html += '<div id="rv-acts-'+id+'" style="color:var(--text3);font-size:13px">Loading\u2026</div>';
+  // Leads tab
+  html += '<div class="m-panel" id="rp-leads-'+id+'" style="padding:12px 16px">';
+  html += '<div id="rv-leads-'+id+'" style="color:var(--text3);font-size:13px">Loading\u2026</div>';
   html += '</div>';
 
   // Events tab
@@ -552,20 +552,15 @@ function renderRouteSheet(stop) {{
   html += '<div id="rv-box-st-'+id+'" style="font-size:12px;text-align:center;min-height:14px"></div>';
   html += '</div></div>';
 
-  // Capture Lead — always available regardless of status
-  html += '<div style="padding:12px 16px 0">';
-  html += '<button onclick="openLeadFormForStop()" style="width:100%;background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:10px;padding:12px;font-size:14px;font-weight:700;cursor:pointer">\U0001f4cb Capture Lead</button>';
-  html += '</div>';
-
   // Check In / Skip / Didn't Get To buttons
   if (status === 'Pending') {{
-    html += '<div style="padding:12px 16px 16px;display:flex;gap:10px">';
+    html += '<div style="padding:16px;display:flex;gap:10px">';
     html += '<button onclick="routeCheckIn('+id+')" style="flex:1;background:#ea580c;color:#fff;border:none;border-radius:10px;padding:14px;font-size:15px;font-weight:700;cursor:pointer">Check In</button>';
     html += '<button onclick="routeSkip('+id+')" style="width:70px;background:var(--bg);color:var(--text2);border:1px solid var(--border);border-radius:10px;padding:14px;font-size:12px;font-weight:600;cursor:pointer">Skip</button>';
     html += '<button onclick="routeNotReached('+id+')" style="width:70px;background:var(--bg);color:#ef4444;border:1px solid #ef444440;border-radius:10px;padding:14px;font-size:11px;font-weight:600;cursor:pointer;line-height:1.2">Didn\\\'t<br>Get To</button>';
     html += '</div>';
   }} else {{
-    html += '<div style="padding:12px 16px 16px"><button onclick="routeCheckInForm()" style="width:100%;background:#ea580c;color:#fff;border:none;border-radius:10px;padding:14px;font-size:15px;font-weight:700;cursor:pointer">Check In</button></div>';
+    html += '<div style="padding:16px"><button onclick="routeCheckInForm()" style="width:100%;background:#ea580c;color:#fff;border:none;border-radius:10px;padding:14px;font-size:15px;font-weight:700;cursor:pointer">Check In</button></div>';
   }}
 
   return html;
@@ -585,12 +580,12 @@ async function loadRouteVenueData(stop) {{
   // Get venue ID from the stop's venue link
   var venueId = stop.venue_id;
   if (!venueId) return;
-  // Load venue details, activities, events, boxes, companies in parallel
+  // Load venue details, activities, events, boxes, companies, leads in parallel
   var results = await Promise.all([
     fetchAll(_GGOR_VENUES), fetchAll(_GGOR_ACTS), fetchAll(_GGOR_BOXES),
-    fetchAll({T_COMPANIES})
+    fetchAll({T_COMPANIES}), fetchAll({T_LEADS})
   ]);
-  var venues = results[0], acts = results[1], boxes = results[2], companies = results[3];
+  var venues = results[0], acts = results[1], boxes = results[2], companies = results[3], leads = results[4];
   var v = venues.find(function(x){{return x.id === venueId;}});
   if (!v) return;
   var id = stop.stop_id;
@@ -637,39 +632,51 @@ async function loadRouteVenueData(stop) {{
   }}
 
   // Fill Activity tab — log-new form + history
-  var actsEl = document.getElementById('rv-acts-' + id);
-  if (actsEl) {{
-    var myActs = acts.filter(function(a) {{
-      var lf = a['Business'];
-      return Array.isArray(lf) && lf.some(function(r){{return r.id===venueId;}});
-    }}).sort(function(a,b){{return (b['Date']||'').localeCompare(a['Date']||'');}}).slice(0,10);
-    // Log-new-activity form (collapsed by default)
-    var ah = '<div style="margin-bottom:12px">';
-    ah += '<button onclick="mRouteToggleLogForm()" style="width:100%;background:#ea580c20;color:#ea580c;border:1px solid #ea580c40;border-radius:8px;padding:10px;font-size:13px;font-weight:600;cursor:pointer;min-height:44px">+ Log new activity</button>';
-    ah += '<div id="rv-act-form-'+id+'" style="display:none;margin-top:10px;background:var(--card);border:1px solid var(--border);border-radius:8px;padding:10px">';
-    ah += '<select id="rv-act-type-'+id+'" style="width:100%;background:var(--bg);border:1px solid var(--border);color:var(--text1);border-radius:6px;padding:8px 10px;font-size:14px;margin-bottom:6px">';
-    ah += '<option value="">Type\u2026</option><option>Email</option><option>Phone</option><option>In-Person</option><option>Text</option><option>Other</option>';
-    ah += '</select>';
-    ah += '<select id="rv-act-out-'+id+'" style="width:100%;background:var(--bg);border:1px solid var(--border);color:var(--text1);border-radius:6px;padding:8px 10px;font-size:14px;margin-bottom:6px">';
-    ah += '<option value="">Outcome\u2026</option><option>Positive</option><option>Neutral</option><option>Negative</option><option>Left message</option><option>No answer</option>';
-    ah += '</select>';
-    ah += '<input type="text" id="rv-act-sum-'+id+'" placeholder="Brief summary\u2026" style="width:100%;background:var(--bg);border:1px solid var(--border);color:var(--text1);border-radius:6px;padding:8px 10px;font-size:14px;margin-bottom:8px;box-sizing:border-box">';
-    ah += '<button onclick="mRouteLogActivity()" style="width:100%;background:#ea580c;color:#fff;border:none;border-radius:6px;padding:10px;font-size:14px;font-weight:600;cursor:pointer;min-height:44px">Save Activity</button>';
-    ah += '<div id="rv-act-st-'+id+'" style="font-size:11px;margin-top:6px;text-align:center;min-height:14px"></div>';
-    ah += '</div></div>';
-    // History list — wrapped so the log-activity handler can prepend to it
-    var histHtml = myActs.length
-      ? myActs.map(function(a) {{
-          var t = (a['Type'] && a['Type'].value) || a['Type'] || '';
-          var o = (a['Outcome'] && a['Outcome'].value) || a['Outcome'] || '';
-          var d = a['Date'] || '';
-          return '<div style="padding:6px 0;border-bottom:1px solid var(--border);font-size:13px">'
-            + '<span style="font-weight:600">'+esc(t)+'</span>'
-            + (o ? ' \u2014 '+esc(o) : '')
-            + '<div style="font-size:11px;color:var(--text3)">'+esc(d)+'</div></div>';
-        }}).join('')
-      : '<div style="color:var(--text3)">No activities yet</div>';
-    actsEl.innerHTML = ah + '<div id="rv-acts-list-'+id+'">' + histHtml + '</div>';
+  var leadsEl = document.getElementById('rv-leads-' + id);
+  if (leadsEl) {{
+    // Match leads to this business by Source field (T_LEADS has no direct
+    // Company link). When a lead is captured via our in-stop form, Source
+    // is pre-filled with the referring company/venue name, so this works.
+    var vName = (v['Name'] || '').trim().toLowerCase();
+    var cName = '';
+    if (companyId) {{
+      var cRow = companies.find(function(x){{return x.id === companyId;}});
+      if (cRow) cName = (cRow.Name || '').trim().toLowerCase();
+    }}
+    var myLeads = leads.filter(function(L) {{
+      var src = (L['Source'] || '').trim().toLowerCase();
+      return src && (src === vName || (cName && src === cName));
+    }}).sort(function(a,b) {{
+      return (b['Created']||'').localeCompare(a['Created']||'');
+    }});
+    var lh = '<div style="margin-bottom:12px">';
+    lh += '<button onclick="openLeadFormForStop()" style="width:100%;background:#ea580c;color:#fff;border:none;border-radius:8px;padding:12px;font-size:14px;font-weight:700;cursor:pointer;min-height:44px">+ Capture Lead</button>';
+    lh += '</div>';
+    if (myLeads.length) {{
+      var stColors = {{'New':'#3b82f6','Contacted':'#ea580c','Appointment Set':'#7c3aed','Patient Seen':'#0891b2','Converted':'#059669','Dropped':'#9ca3af'}};
+      lh += myLeads.map(function(L) {{
+        var nm = L['Name'] || '(no name)';
+        var ph = L['Phone'] || '';
+        var rs = (L['Reason'] && L['Reason'].value) || L['Reason'] || '';
+        var st = (L['Status'] && L['Status'].value) || L['Status'] || 'New';
+        var dt = (L['Created'] || '').slice(0,10);
+        var col = stColors[st] || '#6b7280';
+        var line2 = '';
+        if (ph) line2 += esc(ph);
+        if (rs) line2 += (line2 ? ' • ' : '') + esc(rs);
+        return '<div style="padding:10px 0;border-bottom:1px solid var(--border);font-size:13px">'
+             + '<div style="display:flex;justify-content:space-between;align-items:center;gap:8px">'
+             + '<span style="font-weight:600">'+esc(nm)+'</span>'
+             + '<span style="background:'+col+'22;color:'+col+';font-size:11px;padding:2px 8px;border-radius:4px;font-weight:600;white-space:nowrap">'+esc(st)+'</span>'
+             + '</div>'
+             + (line2 ? '<div style="color:var(--text2);font-size:12px;margin-top:2px">'+line2+'</div>' : '')
+             + (dt ? '<div style="color:var(--text3);font-size:11px;margin-top:2px">'+esc(dt)+'</div>' : '')
+             + '</div>';
+      }}).join('');
+    }} else {{
+      lh += '<div style="color:var(--text3);padding:6px 0">No leads captured from this business yet.</div>';
+    }}
+    leadsEl.innerHTML = lh;
   }}
 
   // Fill Events tab
@@ -959,49 +966,6 @@ async function mRouteAddNote() {{
   }}
 }}
 
-async function mRouteLogActivity() {{
-  var stop = _rCurrentStop; if (!stop || !stop.venue_id) return;
-  var venueId = stop.venue_id, id = stop.stop_id;
-  var typeEl = document.getElementById('rv-act-type-' + id);
-  var outEl  = document.getElementById('rv-act-out-' + id);
-  var sumEl  = document.getElementById('rv-act-sum-' + id);
-  var stEl   = document.getElementById('rv-act-st-' + id);
-  var formEl = document.getElementById('rv-act-form-' + id);
-  var listEl = document.getElementById('rv-acts-list-' + id);
-  var type    = typeEl ? typeEl.value : '';
-  var outcome = outEl  ? outEl.value  : '';
-  var summary = sumEl  ? sumEl.value.trim()  : '';
-  if (!type) {{ if (stEl) {{ stEl.textContent = 'Pick a type first'; stEl.style.color = '#ef4444'; }} return; }}
-  if (stEl) {{ stEl.textContent = 'Saving\u2026'; stEl.style.color = 'var(--text3)'; }}
-  var res = await Contact.logActivity('gorilla', venueId, {{type: type, outcome: outcome, summary: summary}});
-  if (stEl) {{
-    stEl.textContent = res.ok ? '\u2713 Logged' : '\u2717 Failed';
-    stEl.style.color = res.ok ? '#059669' : '#ef4444';
-    setTimeout(function() {{ if (stEl) stEl.textContent = ''; }}, 2000);
-  }}
-  if (res.ok) {{
-    if (typeEl) typeEl.value = '';
-    if (outEl) outEl.value = '';
-    if (sumEl) sumEl.value = '';
-    if (formEl) formEl.style.display = 'none';
-    if (listEl) {{
-      var d = (res.row && res.row['Date']) || new Date().toISOString().split('T')[0];
-      var html = '<div style="padding:6px 0;border-bottom:1px solid var(--border);font-size:13px">'
-        + '<span style="font-weight:600">'+esc(type)+'</span>'
-        + (outcome ? ' \u2014 '+esc(outcome) : '')
-        + (summary ? '<div style="font-size:12px;color:var(--text2);margin-top:2px">'+esc(summary)+'</div>' : '')
-        + '<div style="font-size:11px;color:var(--text3)">'+esc(d)+'</div></div>';
-      if (listEl.innerHTML.indexOf('No activities yet') !== -1) listEl.innerHTML = '';
-      listEl.innerHTML = html + listEl.innerHTML;
-    }}
-  }}
-}}
-
-function mRouteToggleLogForm() {{
-  var stop = _rCurrentStop; if (!stop) return;
-  var el = document.getElementById('rv-act-form-' + stop.stop_id);
-  if (el) el.style.display = el.style.display === 'none' ? 'block' : 'none';
-}}
 
 // ── Capture Lead (baked into the stop sheet) ────────────────────────────
 // Lookup tables populated once on page load. Mirrors what
