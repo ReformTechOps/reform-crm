@@ -679,6 +679,7 @@ async function loadRouteVenueData(stop) {{
         var sm = a['Summary'] || '';
         var sentV = (a.Sentiment && a.Sentiment.value) || a.Sentiment || '';
         var photo = (a['Photo URL'] || '').trim();
+        var audio = (a['Audio URL'] || '').trim();
         var sDot = (sentV && _SENT_COLORS_R[sentV])
           ? '<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:'+_SENT_COLORS_R[sentV]+';margin-right:5px;vertical-align:middle"></span>'
           : '';
@@ -689,9 +690,13 @@ async function loadRouteVenueData(stop) {{
         var thumb = photo
           ? '<div style="margin-top:4px"><img src="'+esc(photo)+'" onclick="openRoutePhotoLightbox(\\''+esc(photo)+'\\')" style="max-width:110px;max-height:80px;border-radius:6px;border:1px solid var(--border);cursor:pointer;object-fit:cover"></div>'
           : '';
+        var player = audio
+          ? '<div style="margin-top:4px"><audio controls preload="none" src="'+esc(audio)+'" style="width:100%;height:30px"></audio></div>'
+          : '';
         return '<div style="padding:6px 0;border-bottom:1px solid var(--border);font-size:13px">'
              + head
              + (sm ? '<div style="font-size:12px;color:var(--text2);margin-top:2px">'+esc(sm)+'</div>' : '')
+             + player
              + thumb
              + (d ? '<div style="font-size:11px;color:var(--text3);margin-top:2px">'+esc(d)+'</div>' : '')
              + '</div>';

@@ -120,6 +120,22 @@ def _mobile_company_detail_page(br: str, bt: str, company_id: int,
         'style="flex:1;padding:8px;background:var(--bg);border:1px solid var(--border);'
         'color:var(--text);border-radius:6px;font-size:13px;cursor:pointer;font-family:inherit">🔴 Bad</button>'
         '</div>'
+        # Voice note (records → transcribes → fills Notes textarea)
+        '<label style="display:block;font-size:11px;font-weight:700;color:var(--text3);'
+        'text-transform:uppercase;margin-bottom:4px;letter-spacing:.4px">Voice note (optional)</label>'
+        '<div id="cd-voice-row" style="margin-bottom:12px">'
+        '<button type="button" id="cd-voice-btn" onclick="toggleVoiceNote()" '
+        'style="display:inline-flex;align-items:center;gap:6px;padding:8px 12px;background:var(--bg);'
+        'border:1px solid var(--border);color:var(--text2);border-radius:6px;font-size:13px;cursor:pointer;font-family:inherit">'
+        '🎤 Record</button>'
+        '<span id="cd-voice-st" style="margin-left:8px;font-size:11px;color:var(--text3)"></span>'
+        '<div id="cd-voice-preview" style="display:none;margin-top:8px">'
+        '<audio id="cd-voice-audio" controls style="width:100%;height:36px"></audio>'
+        '<button type="button" onclick="clearVoiceNote()" '
+        'style="margin-top:4px;padding:4px 10px;background:none;border:1px solid var(--border);'
+        'color:var(--text3);border-radius:6px;font-size:11px;cursor:pointer">Discard</button>'
+        '</div>'
+        '</div>'
         # Photo capture
         '<label style="display:block;font-size:11px;font-weight:700;color:var(--text3);'
         'text-transform:uppercase;margin-bottom:4px;letter-spacing:.4px">Photo (optional)</label>'
@@ -426,6 +442,7 @@ function renderInfoTab() {{
       var who   = a.Author || '';
       var sent  = svJS(a.Sentiment) || '';
       var photo = (a['Photo URL'] || '').trim();
+      var audio = (a['Audio URL'] || '').trim();
       vh += '<div style="background:var(--card);border:1px solid var(--border);border-radius:8px;padding:10px 12px;margin-bottom:6px">';
       vh += '<div style="display:flex;gap:8px;align-items:center;margin-bottom:4px">';
       if (sent && SENT_COLORS_J[sent]) {{
@@ -435,6 +452,9 @@ function renderInfoTab() {{
       vh += '<span style="font-size:10px;color:var(--text3)">' + esc(fmtDate(when)) + (who ? ' · ' + esc(who.split('@')[0]) : '') + '</span>';
       vh += '</div>';
       if (summ) vh += '<div style="font-size:13px;color:var(--text2);white-space:pre-wrap">' + esc(summ) + '</div>';
+      if (audio) {{
+        vh += '<div style="margin-top:6px"><audio controls preload="none" src="' + esc(audio) + '" style="width:100%;height:32px"></audio></div>';
+      }}
       if (photo) {{
         vh += '<div style="margin-top:6px"><img src="' + esc(photo) + '" onclick="openPhotoLightbox(\\'' + esc(photo) + '\\')" '
             + 'style="max-width:120px;max-height:90px;border-radius:6px;border:1px solid var(--border);cursor:pointer;object-fit:cover"></div>';
@@ -650,6 +670,115 @@ function openPhotoLightbox(url) {{
   document.body.appendChild(bg);
 }}
 
+// ── Voice notes (MediaRecorder + Whisper) ────────────────────────────────
+let _cdVoiceRecorder = null;
+let _cdVoiceChunks = [];
+let _cdVoiceBlob = null;
+let _cdVoiceUrl = '';        // Bunny URL after transcription
+let _cdVoiceTranscript = ''; // raw Whisper transcript
+let _cdVoiceTimer = null;
+let _cdVoiceStartedAt = 0;
+const _CD_VOICE_MAX_MS = 90000;  // 90s cap
+
+async function toggleVoiceNote() {{
+  var btn = document.getElementById('cd-voice-btn');
+  var st  = document.getElementById('cd-voice-st');
+  if (_cdVoiceRecorder && _cdVoiceRecorder.state === 'recording') {{
+    _cdVoiceRecorder.stop();
+    return;
+  }}
+  // Start a new recording
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {{
+    alert('Mic recording is not supported on this device/browser.');
+    return;
+  }}
+  try {{
+    var stream = await navigator.mediaDevices.getUserMedia({{ audio: true }});
+    var mime = MediaRecorder.isTypeSupported('audio/webm;codecs=opus') ? 'audio/webm;codecs=opus'
+              : MediaRecorder.isTypeSupported('audio/webm') ? 'audio/webm'
+              : MediaRecorder.isTypeSupported('audio/mp4') ? 'audio/mp4' : '';
+    _cdVoiceRecorder = new MediaRecorder(stream, mime ? {{ mimeType: mime }} : undefined);
+    _cdVoiceChunks = [];
+    _cdVoiceRecorder.ondataavailable = function(e) {{
+      if (e.data && e.data.size > 0) _cdVoiceChunks.push(e.data);
+    }};
+    _cdVoiceRecorder.onstop = async function() {{
+      stream.getTracks().forEach(function(t) {{ t.stop(); }});
+      if (_cdVoiceTimer) {{ clearInterval(_cdVoiceTimer); _cdVoiceTimer = null; }}
+      _cdVoiceBlob = new Blob(_cdVoiceChunks, {{ type: mime || 'audio/webm' }});
+      btn.textContent = '🎤 Record again';
+      btn.style.background = 'var(--bg)';
+      btn.style.color = 'var(--text2)';
+      st.textContent = 'Transcribing…';
+      // Upload + transcribe
+      var fd = new FormData();
+      var ext = (mime && mime.indexOf('mp4') !== -1) ? 'mp4' : 'webm';
+      fd.append('audio', _cdVoiceBlob, 'recording.' + ext);
+      try {{
+        var r = await fetch('/api/activities/transcribe', {{ method: 'POST', body: fd }});
+        if (!r.ok) {{
+          st.textContent = 'Transcription failed (HTTP ' + r.status + ')';
+          st.style.color = '#ef4444';
+          return;
+        }}
+        var d = await r.json();
+        _cdVoiceUrl = d.audio_url || '';
+        _cdVoiceTranscript = d.transcript || '';
+        if (_cdVoiceUrl) {{
+          var audioEl = document.getElementById('cd-voice-audio');
+          audioEl.src = _cdVoiceUrl;
+          document.getElementById('cd-voice-preview').style.display = 'block';
+        }}
+        if (_cdVoiceTranscript) {{
+          // Fill Notes textarea (rep can edit before submit). Append if there's
+          // already text, replace if it's empty.
+          var ta = document.getElementById('cd-summary');
+          if (ta.value.trim()) {{
+            ta.value = ta.value.trimEnd() + '\\n\\n' + _cdVoiceTranscript;
+          }} else {{
+            ta.value = _cdVoiceTranscript;
+          }}
+          st.style.color = '#059669';
+          st.textContent = '✓ Transcribed';
+        }} else if (d.error) {{
+          st.style.color = '#ef4444';
+          st.textContent = d.error;
+        }} else {{
+          st.style.color = '#f59e0b';
+          st.textContent = 'No transcript returned';
+        }}
+      }} catch (e) {{
+        st.style.color = '#ef4444';
+        st.textContent = 'Network error';
+      }}
+    }};
+    _cdVoiceRecorder.start();
+    _cdVoiceStartedAt = Date.now();
+    btn.textContent = '⏹ Stop';
+    btn.style.background = '#ef4444';
+    btn.style.color = '#fff';
+    st.style.color = 'var(--text3)';
+    st.textContent = '0:00';
+    _cdVoiceTimer = setInterval(function() {{
+      var s = Math.floor((Date.now() - _cdVoiceStartedAt) / 1000);
+      st.textContent = Math.floor(s/60) + ':' + String(s%60).padStart(2,'0');
+      if (Date.now() - _cdVoiceStartedAt >= _CD_VOICE_MAX_MS && _cdVoiceRecorder.state === 'recording') {{
+        _cdVoiceRecorder.stop();
+      }}
+    }}, 250);
+  }} catch (e) {{
+    alert('Could not access mic: ' + (e.message || e));
+  }}
+}}
+
+function clearVoiceNote() {{
+  _cdVoiceBlob = null; _cdVoiceUrl = ''; _cdVoiceTranscript = '';
+  document.getElementById('cd-voice-preview').style.display = 'none';
+  document.getElementById('cd-voice-audio').src = '';
+  document.getElementById('cd-voice-btn').textContent = '🎤 Record';
+  document.getElementById('cd-voice-st').textContent = '';
+}}
+
 // ── Log-activity modal ───────────────────────────────────────────────────
 let _cdSentiment = '';
 let _cdPhotoFile = null;
@@ -695,6 +824,7 @@ function openLogModal() {{
   _cdSentiment = '';
   setSentiment('');  // resets button styles
   clearPhoto();
+  clearVoiceNote();
   document.getElementById('cd-modal-bg').style.display = 'flex';
 }}
 
@@ -749,6 +879,8 @@ async function submitLog() {{
   if (status) body.new_status = status;
   if (_cdSentiment) body.sentiment = _cdSentiment;
   if (photoUrl) body.photo_url = photoUrl;
+  if (_cdVoiceUrl) body.audio_url = _cdVoiceUrl;
+  if (_cdVoiceTranscript) body.transcript = _cdVoiceTranscript;
   var r = await fetch('/api/companies/' + COMPANY_ID + '/activities', {{
     method: 'POST', headers: {{ 'Content-Type': 'application/json' }},
     body: JSON.stringify(body),

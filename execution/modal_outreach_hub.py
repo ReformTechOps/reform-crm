@@ -69,7 +69,7 @@ app = modal.App("outreach-hub")
 image = (
     modal.Image.debian_slim()
     .apt_install("libpango-1.0-0", "libpangoft2-1.0-0", "libcairo2", "libfontconfig1")
-    .pip_install("fastapi[standard]", "python-multipart", "httpx", "weasyprint")
+    .pip_install("fastapi[standard]", "python-multipart", "httpx", "weasyprint", "openai==1.59.*")
     .add_local_python_source("hub")
 )
 
@@ -2372,6 +2372,8 @@ def web():
             "Company":        [company_id],
             "Sentiment":      sentiment or None,
             "Photo URL":      (body.get("photo_url") or "").strip() or None,
+            "Audio URL":      (body.get("audio_url") or "").strip() or None,
+            "Transcript":     (body.get("transcript") or "").strip() or None,
         }
         if body.get("contact_id"):
             payload["Contact"] = [int(body["contact_id"])]
@@ -2395,6 +2397,19 @@ def web():
         env = _env()
         return await outreach_api.upload_activity_photo(
             request, env["br"], env["bt"], session, company_id,
+            bunny_zone=os.environ.get("BUNNY_STORAGE_ZONE", "techopssocialmedia"),
+            bunny_key=os.environ.get("BUNNY_STORAGE_API_KEY", ""),
+            bunny_cdn_base="https://techopssocialmedia.b-cdn.net",
+        )
+
+    @fapp.post("/api/activities/transcribe")
+    async def api_activity_transcribe(request: Request):
+        session, err = _crm_guard(request)
+        if err: return err
+        from hub import outreach_api
+        return await outreach_api.transcribe_activity_audio(
+            request, session,
+            openai_api_key=os.environ.get("OPENAI_API_KEY", ""),
             bunny_zone=os.environ.get("BUNNY_STORAGE_ZONE", "techopssocialmedia"),
             bunny_key=os.environ.get("BUNNY_STORAGE_API_KEY", ""),
             bunny_cdn_base="https://techopssocialmedia.b-cdn.net",

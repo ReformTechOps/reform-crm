@@ -199,6 +199,20 @@ async def upload_activity_photo(company_id: int, request: Request):
     )
 
 
+@router.post("/api/activities/transcribe")
+async def transcribe_activity_audio(request: Request):
+    session = await get_session(request)
+    if not session:
+        return JSONResponse({"error": "unauthenticated"}, status_code=401)
+    from hub import outreach_api
+    bzone, bkey, bcdn = _bunny_env()
+    return await outreach_api.transcribe_activity_audio(
+        request, session,
+        openai_api_key=os.environ.get("OPENAI_API_KEY", ""),
+        bunny_zone=bzone, bunny_key=bkey, bunny_cdn_base=bcdn,
+    )
+
+
 # ─── Lead capture (field-rep form) ───────────────────────────────────────────
 # Field reps submit the Capture Lead form to this endpoint. Creates a T_LEADS
 # row; on success, the mobile UI closes the form. The hub has an analogous

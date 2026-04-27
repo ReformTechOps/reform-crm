@@ -131,6 +131,8 @@ async def create_company_activity(
         "Company":        [company_id],
         "Sentiment":      sentiment or None,
         "Photo URL":      (body.get("photo_url") or "").strip() or None,
+        "Audio URL":      (body.get("audio_url") or "").strip() or None,
+        "Transcript":     (body.get("transcript") or "").strip() or None,
     }
     if body.get("contact_id"):
         try: payload["Contact"] = [int(body["contact_id"])]
@@ -169,6 +171,62 @@ async def create_company_activity(
         try: await invalidate(T_ACTIVITIES, T_COMPANIES)
         except Exception: pass
     return JSONResponse(r.json())
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# POST /api/activities/transcribe — upload audio to Bunny + transcribe via Whisper
+# Returns {audio_url, transcript}; client fills the Notes textarea with the
+# transcript (rep can edit) and includes both in the activity payload.
+# ─────────────────────────────────────────────────────────────────────────────
+async def transcribe_activity_audio(
+    request, user: dict, openai_api_key: str,
+    bunny_zone: str, bunny_key: str, bunny_cdn_base: str,
+) -> JSONResponse:
+    import httpx, secrets
+    if not openai_api_key:
+        return JSONResponse({"error": "transcription not configured"}, status_code=503)
+    form = await request.form()
+    audio = form.get("audio")
+    if not audio or not hasattr(audio, "read"):
+        return JSONResponse({"error": "audio file required"}, status_code=400)
+    data = await audio.read()
+    if not data:
+        return JSONResponse({"error": "empty audio"}, status_code=400)
+    fname = (audio.filename or "recording.webm").rsplit(".", 1)
+    ext = fname[1].lower() if len(fname) == 2 else "webm"
+    if ext not in ("webm", "mp4", "m4a", "mp3", "wav", "ogg"):
+        ext = "webm"
+    key = f"{secrets.token_urlsafe(8)}.{ext}"
+    upload_url = f"https://la.storage.bunnycdn.com/{bunny_zone}/activities/audio/{key}"
+    audio_url = ""
+    async with httpx.AsyncClient(timeout=60) as client:
+        ur = await client.put(
+            upload_url,
+            content=data,
+            headers={"AccessKey": bunny_key, "Content-Type": "application/octet-stream"},
+        )
+        if ur.status_code in (200, 201):
+            audio_url = f"{bunny_cdn_base}/activities/audio/{key}"
+        else:
+            return JSONResponse({"error": f"bunny upload {ur.status_code}"}, status_code=502)
+    # Transcribe via OpenAI Whisper. AsyncOpenAI accepts a (filename, bytes) tuple.
+    try:
+        from openai import AsyncOpenAI
+        client = AsyncOpenAI(api_key=openai_api_key)
+        result = await client.audio.transcriptions.create(
+            model="whisper-1",
+            file=(f"recording.{ext}", data),
+        )
+        transcript = (getattr(result, "text", "") or "").strip()
+    except Exception as e:
+        # Bunny upload succeeded; surface partial result so the rep doesn't lose
+        # the recording even if Whisper fails.
+        return JSONResponse({
+            "audio_url": audio_url,
+            "transcript": "",
+            "error": f"transcription failed: {str(e)[:200]}",
+        }, status_code=200)
+    return JSONResponse({"audio_url": audio_url, "transcript": transcript})
 
 
 # ─────────────────────────────────────────────────────────────────────────────
