@@ -749,10 +749,15 @@ async def update_route_stop(request: Request, br: str, bt: str, user: dict,
         fields["Check-In Lat"] = lat
         fields["Check-In Lng"] = lng
     async with httpx.AsyncClient(timeout=30) as client:
-        await client.patch(
+        resp = await client.patch(
             f"{br}/api/database/rows/table/{T_GOR_ROUTE_STOPS}/{stop_id}/?user_field_names=true",
             headers={"Authorization": f"Token {bt}", "Content-Type": "application/json"},
             json=fields,
+        )
+    if resp.status_code not in (200, 201):
+        return JSONResponse(
+            {"ok": False, "error": resp.text[:300], "fields": fields},
+            status_code=resp.status_code,
         )
     return JSONResponse({"ok": True})
 

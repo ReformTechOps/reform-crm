@@ -446,9 +446,13 @@ function closeRouteSheet() {{
   if (sheet) sheet.style.transform = '';  // clear any swipe-drag offset
   sheet.classList.remove('open');
   document.getElementById('m-backdrop').classList.remove('open');
-  // Re-enable map gestures
+  // Re-enable map gestures + body scroll
   var rmap = document.getElementById('rmap');
-  if (rmap) rmap.style.pointerEvents = '';
+  if (rmap) {{
+    rmap.style.pointerEvents = '';
+    rmap.style.touchAction = '';
+  }}
+  document.body.style.overflow = '';
   _rCurrentStop = null;
 }}
 
@@ -457,10 +461,16 @@ function openRouteSheet(stop) {{
   document.getElementById('m-sheet').classList.add('open');
   document.getElementById('m-backdrop').classList.add('open');
   document.getElementById('m-sheet-body').innerHTML = renderRouteSheet(stop);
-  // Disable map gestures while sheet is up so the rep can't accidentally
-  // pan the map underneath. Backdrop tap (already wired) closes the sheet.
+  // Lock the map down hard while the sheet is up. Google Maps registers its
+  // own touch handlers inside the gmap div, so we kill BOTH pointer-events
+  // (CSS click/tap) AND touch-action (browser-level pan/pinch). Body scroll
+  // freeze prevents iOS rubber-band scrolling the page underneath.
   var rmap = document.getElementById('rmap');
-  if (rmap) rmap.style.pointerEvents = 'none';
+  if (rmap) {{
+    rmap.style.pointerEvents = 'none';
+    rmap.style.touchAction = 'none';
+  }}
+  document.body.style.overflow = 'hidden';
   // Load venue data for tabs
   loadRouteVenueData(stop);
 }}
