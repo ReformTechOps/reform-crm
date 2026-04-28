@@ -53,9 +53,11 @@ async def update_rep_location(request: Request, br: str, bt: str,
         if not match:
             # No staff row — silently no-op so reps not in T_STAFF don't error
             return JSONResponse({"ok": True, "no_staff_row": True})
+        # Round to 7 decimals (~1cm precision; the field is capped at 7).
+        # Browser geolocation returns 14+ decimals which Baserow rejects.
         patch = {
-            "Latest Lat": float(lat),
-            "Latest Lng": float(lng),
+            "Latest Lat": round(float(lat), 7),
+            "Latest Lng": round(float(lng), 7),
             "Location Updated At": _dt.utcnow().strftime("%Y-%m-%d %H:%M"),
             "Active Route ID": str(route_id) if route_id is not None else "",
         }
