@@ -21,7 +21,8 @@ from fastapi.responses import JSONResponse
 
 from hub import guerilla_api
 from hub.constants import (
-    T_EVENTS, T_GOR_BOXES, T_GOR_ROUTES, T_GOR_ROUTE_STOPS, T_GOR_VENUES, T_LEADS,
+    T_EVENTS, T_GOR_ACTS, T_GOR_BOXES, T_GOR_ROUTES, T_GOR_ROUTE_STOPS,
+    T_GOR_VENUES, T_LEADS,
 )
 
 from .. import storage
