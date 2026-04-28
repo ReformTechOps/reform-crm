@@ -442,8 +442,13 @@ function toggleLeg(idx) {{
 }}
 
 function closeRouteSheet() {{
-  document.getElementById('m-sheet').classList.remove('open');
+  var sheet = document.getElementById('m-sheet');
+  if (sheet) sheet.style.transform = '';  // clear any swipe-drag offset
+  sheet.classList.remove('open');
   document.getElementById('m-backdrop').classList.remove('open');
+  // Re-enable map gestures
+  var rmap = document.getElementById('rmap');
+  if (rmap) rmap.style.pointerEvents = '';
   _rCurrentStop = null;
 }}
 
@@ -452,9 +457,50 @@ function openRouteSheet(stop) {{
   document.getElementById('m-sheet').classList.add('open');
   document.getElementById('m-backdrop').classList.add('open');
   document.getElementById('m-sheet-body').innerHTML = renderRouteSheet(stop);
+  // Disable map gestures while sheet is up so the rep can't accidentally
+  // pan the map underneath. Backdrop tap (already wired) closes the sheet.
+  var rmap = document.getElementById('rmap');
+  if (rmap) rmap.style.pointerEvents = 'none';
   // Load venue data for tabs
   loadRouteVenueData(stop);
 }}
+
+// Swipe-down on the handle (or anywhere on the sheet's top area) to close.
+// Inline so it runs once the script body executes — the handle div is in the
+// static HTML so it always exists by then.
+(function() {{
+  var sheet = document.getElementById('m-sheet');
+  var handle = sheet ? sheet.querySelector('.m-sheet-handle') : null;
+  if (!sheet || !handle) return;
+  var startY = 0; var dragging = false; var dy = 0;
+  function onStart(e) {{
+    var t = (e.touches && e.touches[0]) || e;
+    startY = t.clientY; dragging = true; dy = 0;
+    sheet.style.transition = 'none';
+  }}
+  function onMove(e) {{
+    if (!dragging) return;
+    var t = (e.touches && e.touches[0]) || e;
+    dy = t.clientY - startY;
+    if (dy > 0) sheet.style.transform = 'translateY(' + dy + 'px)';
+  }}
+  function onEnd() {{
+    if (!dragging) return;
+    dragging = false;
+    sheet.style.transition = '';
+    if (dy > 80) {{
+      // Past threshold — close
+      closeRouteSheet();
+    }} else {{
+      // Snap back to fully open
+      sheet.style.transform = '';
+    }}
+  }}
+  handle.addEventListener('touchstart', onStart, {{ passive: true }});
+  handle.addEventListener('touchmove',  onMove,  {{ passive: true }});
+  handle.addEventListener('touchend',   onEnd);
+  handle.addEventListener('touchcancel', onEnd);
+}})();
 
 function _getBoxPickupInfo(venueId) {{
   if (!_allBoxesCache) return null;
@@ -991,14 +1037,24 @@ async function markRouteStop(stopId, status, callback, reason) {{
     _routeData = await r.json();
     updateProgress();
     // Update marker color
+    var freshStop = null;
     if (_rMarkers[stopId] && _rMap) {{
       var color = _STATUS_COLORS[status] || '#4285f4';
-      var stop = (_routeData.stops||[]).find(function(s){{return s.stop_id===stopId;}});
-      var idx = stop ? stop.order : '?';
+      freshStop = (_routeData.stops||[]).find(function(s){{return s.stop_id===stopId;}});
+      var idx = freshStop ? freshStop.order : '?';
       _rMarkers[stopId].setIcon({{path:google.maps.SymbolPath.CIRCLE,scale:14,fillColor:color,fillOpacity:1,strokeColor:'#fff',strokeWeight:2}});
       _rMarkers[stopId].setLabel({{text:String(idx),color:'#fff',fontWeight:'700',fontSize:'12px'}});
     }}
-    closeRouteSheet();
+    // Arrive (In Progress) is mid-flow — keep the sheet open and re-render so
+    // the user immediately sees the Check In button. Visited/Skipped/Not
+    // Reached are terminal — close the sheet.
+    if (status === 'In Progress' && freshStop) {{
+      _rCurrentStop = freshStop;
+      document.getElementById('m-sheet-body').innerHTML = renderRouteSheet(freshStop);
+      loadRouteVenueData(freshStop);
+    }} else {{
+      closeRouteSheet();
+    }}
     if (callback) callback();
   }} catch(e) {{
     alert('Could not update stop. Try again.');
