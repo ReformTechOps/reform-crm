@@ -5,6 +5,7 @@ import os
 from hub.shared import (
     _mobile_page, _is_admin,
     T_GOR_VENUES, T_GOR_ACTS, T_GOR_BOXES, T_COMPANIES, T_EVENTS, T_LEADS,
+    LEAD_MODAL_HTML, LEAD_MODAL_JS,
 )
 from hub.guerilla import GFR_EXTRA_HTML, GFR_EXTRA_JS
 from hub.contact_detail import contact_actions_js
@@ -80,29 +81,8 @@ def _mobile_route_page(br: str, bt: str, user: dict = None,
         'background:#ea580c;color:#fff;border:none;border-radius:22px;padding:10px 16px;'
         'font-size:13px;font-weight:700;box-shadow:0 4px 12px rgba(234,88,12,.4);cursor:pointer;font-family:inherit;'
         'max-width:60vw;text-align:left;line-height:1.2"></button>'
-        # Lead detail / edit modal
-        '<div id="lead-modal-bg" onclick="if(event.target===this)closeLeadModal()" '
-        'style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:1100;'
-        'align-items:flex-start;justify-content:center;padding:30px 14px;overflow-y:auto">'
-        '<div style="background:var(--bg2);border:1px solid var(--border);border-radius:14px;'
-        'width:100%;max-width:480px;padding:18px 20px calc(20px + env(safe-area-inset-bottom))">'
-        '<div style="display:flex;align-items:center;gap:10px;margin-bottom:14px">'
-        '<h3 style="margin:0;color:var(--text);font-size:16px;flex:1">Lead</h3>'
-        '<button onclick="closeLeadModal()" style="background:none;border:none;color:var(--text3);'
-        'font-size:18px;cursor:pointer;padding:4px 8px">×</button>'
-        '</div>'
-        '<div id="lead-modal-body" style="font-size:13px;color:var(--text2)">Loading…</div>'
-        '<div id="lead-modal-msg" style="font-size:12px;min-height:16px;margin-top:8px"></div>'
-        '<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:10px">'
-        '<button onclick="closeLeadModal()" '
-        'style="padding:9px 16px;background:none;border:1px solid var(--border);color:var(--text2);'
-        'border-radius:6px;font-size:13px;cursor:pointer;font-family:inherit">Cancel</button>'
-        '<button id="lead-modal-save" onclick="saveLeadModal()" '
-        'style="padding:9px 20px;background:#059669;border:none;color:#fff;border-radius:6px;'
-        'font-size:13px;font-weight:700;cursor:pointer;font-family:inherit">Save</button>'
-        '</div>'
-        '</div>'
-        '</div>'
+        # Lead detail / edit modal — shared snippet defined in hub.shells
+        + LEAD_MODAL_HTML
     )
     route_js = f"""
 const RGK = {repr(gk)};
@@ -309,109 +289,6 @@ function openNextStop() {{
   if (next) openRouteSheet(next);
 }}
 
-// ── Lead detail modal ───────────────────────────────────────────────────
-let _leadModalId = null;
-
-async function openLeadModal(leadId) {{
-  _leadModalId = leadId;
-  document.getElementById('lead-modal-msg').textContent = '';
-  document.getElementById('lead-modal-body').textContent = 'Loading…';
-  document.getElementById('lead-modal-bg').style.display = 'flex';
-  document.body.style.overflow = 'hidden';
-  try {{
-    var r = await fetch('/api/leads/' + leadId);
-    if (!r.ok) {{
-      document.getElementById('lead-modal-body').innerHTML =
-        '<div style="color:#ef4444">Failed to load lead (HTTP ' + r.status + ')</div>';
-      return;
-    }}
-    var L = await r.json();
-    var stages = ['New','Contacted','Appointment Set','Patient Seen','Converted','Dropped'];
-    var st = (L.Status && L.Status.value) || L.Status || 'New';
-    var rs = (L.Reason && L.Reason.value) || L.Reason || '';
-    function row(label, html) {{
-      return '<div style="margin-bottom:10px">'
-        + '<label style="display:block;font-size:10px;font-weight:700;color:var(--text3);'
-        + 'text-transform:uppercase;letter-spacing:.4px;margin-bottom:4px">' + esc(label) + '</label>'
-        + html + '</div>';
-    }}
-    var inputCss = 'width:100%;padding:9px;background:var(--bg);border:1px solid var(--border);'
-                 + 'color:var(--text);border-radius:6px;font-size:13px;font-family:inherit';
-    var stageOpts = stages.map(function(s){{
-      return '<option value="' + esc(s) + '"' + (s === st ? ' selected' : '') + '>' + esc(s) + '</option>';
-    }}).join('');
-    var html = ''
-      + row('Name', '<input type="text" id="lm-name" style="' + inputCss + '" value="' + esc(L.Name || '') + '">')
-      + row('Phone', '<input type="tel" id="lm-phone" style="' + inputCss + '" value="' + esc(L.Phone || '') + '">')
-      + row('Email', '<input type="email" id="lm-email" style="' + inputCss + '" value="' + esc(L.Email || '') + '">')
-      + row('Status', '<select id="lm-status" style="' + inputCss + '">' + stageOpts + '</select>')
-      + row('Reason / Service', '<input type="text" id="lm-reason" style="' + inputCss + '" value="' + esc(rs) + '">')
-      + row('Source', '<input type="text" id="lm-source" style="' + inputCss + ';opacity:.7" value="' + esc(L.Source || '') + '" readonly>')
-      + row('Follow-Up Date', '<input type="date" id="lm-fu" style="' + inputCss + '" value="' + esc((L['Follow-Up Date'] || '').slice(0,10)) + '">')
-      + row('Notes', '<textarea id="lm-notes" rows="3" style="' + inputCss + ';resize:vertical">' + esc(L.Notes || '') + '</textarea>')
-      + '<div style="font-size:11px;color:var(--text3);margin-top:6px">Created: ' + esc((L.Created || '').slice(0,10) || '—')
-      + (L.Owner ? ' · Owner: ' + esc(L.Owner) : '') + '</div>';
-    document.getElementById('lead-modal-body').innerHTML = html;
-    // Trigger phone formatting on the prefilled value
-    var phEl = document.getElementById('lm-phone');
-    if (phEl && typeof formatPhone === 'function') formatPhone(phEl);
-  }} catch (e) {{
-    document.getElementById('lead-modal-body').innerHTML =
-      '<div style="color:#ef4444">Network error: ' + esc(e.message || e) + '</div>';
-  }}
-}}
-
-function closeLeadModal() {{
-  document.getElementById('lead-modal-bg').style.display = 'none';
-  document.body.style.overflow = '';
-  _leadModalId = null;
-}}
-
-async function saveLeadModal() {{
-  if (!_leadModalId) return;
-  var msg = document.getElementById('lead-modal-msg');
-  var btn = document.getElementById('lead-modal-save');
-  msg.textContent = '';
-  btn.disabled = true; btn.textContent = 'Saving…';
-  var get = function(id) {{ var el = document.getElementById(id); return el ? el.value.trim() : ''; }};
-  var payload = {{
-    'Name':   get('lm-name'),
-    'Phone':  get('lm-phone'),
-    'Email':  get('lm-email'),
-    'Status': get('lm-status'),
-    'Reason': get('lm-reason'),
-    'Notes':  get('lm-notes'),
-  }};
-  var fu = get('lm-fu');
-  payload['Follow-Up Date'] = fu || null;
-  try {{
-    var r = await fetch('/api/leads/' + _leadModalId, {{
-      method: 'PATCH',
-      headers: {{'Content-Type': 'application/json'}},
-      body: JSON.stringify(payload),
-    }});
-    if (!r.ok) {{
-      var err = '';
-      try {{ err = (await r.json()).error || ''; }} catch (e) {{}}
-      msg.style.color = '#ef4444';
-      msg.textContent = 'Save failed: ' + (err || ('HTTP ' + r.status));
-      btn.disabled = false; btn.textContent = 'Save';
-      return;
-    }}
-    msg.style.color = '#059669';
-    msg.textContent = 'Saved ✓';
-    setTimeout(function() {{
-      closeLeadModal();
-      // Re-render the current stop sheet so the leads list reflects edits
-      if (_rCurrentStop) loadRouteVenueData(_rCurrentStop);
-    }}, 600);
-  }} catch (e) {{
-    msg.style.color = '#ef4444';
-    msg.textContent = 'Network error';
-    btn.disabled = false; btn.textContent = 'Save';
-  }}
-}}
-
 // Modal listing skipped / not-reached stops with their reason notes.
 function openLeftoversPanel() {{
   if (!_routeData || !_routeData.stops) return;
@@ -479,21 +356,28 @@ function renderRouteStops() {{
   if (_rPolyline) {{ _rPolyline.setMap(null); _rPolyline = null; }}
   if (_rDirections) {{ _rDirections.setMap(null); _rDirections = null; }}
   _rLastDirections = null;
-  // Only render Pending + In Progress on the active map. Visited/Skipped/
-  // Not Reached are kept in the data (and surfaced via the leftovers chip
-  // in the progress bar) but excluded from the polyline so the route
-  // visually shrinks as the rep completes stops.
+  // Visible stops on the active map = pending + in-progress, plus the most
+  // recently completed stop pinned as the "you are here" anchor (drawn as
+  // #1 so the rep can see where they just came from). Older completed
+  // stops drop off the map; the leftovers chip in the progress bar still
+  // surfaces Skipped / Not Reached for review.
   var allStops = _routeData.stops || [];
-  var stops = allStops.filter(function(s) {{
+  var _doneStatuses = ['Visited','Skipped','Not Reached'];
+  var pending = allStops.filter(function(s) {{
     return s.status === 'Pending' || s.status === 'In Progress';
   }});
+  var _completedSeq = allStops.filter(function(s) {{
+    return _doneStatuses.indexOf(s.status) >= 0;
+  }});
+  var anchorStop = _completedSeq.length ? _completedSeq[_completedSeq.length - 1] : null;
+  var stops = anchorStop ? [anchorStop].concat(pending) : pending;
   var bounds = new google.maps.LatLngBounds();
   var pathCoords = [];
 
-  // Start point: Reform Chiropractic office
+  // Office is always shown as a marker and is always the end-of-route
+  // waypoint (rep returns to office). It is only the START of the polyline
+  // when no stops have been completed this run.
   var officePos = {{lat: _GOFF_LAT, lng: _GOFF_LNG}};
-  pathCoords.push(officePos);
-  bounds.extend(officePos);
   _rOfficeMarker = new google.maps.Marker({{
     position: officePos, map: _rMap,
     label: {{text: '\u2726', color: '#fff', fontWeight: '700', fontSize: '14px'}},
@@ -501,6 +385,10 @@ function renderRouteStops() {{
     title: 'Reform Chiropractic',
     zIndex: 900
   }});
+  bounds.extend(officePos);
+  // Polyline origin: anchor stop's location is pushed by the forEach below
+  // since it's stops[0]. Only seed with the office when there's no anchor.
+  if (!anchorStop) {{ pathCoords.push(officePos); }}
 
   stops.forEach(function(stop, i) {{
     var lat = parseFloat(stop.lat), lng = parseFloat(stop.lng);
@@ -1005,7 +893,6 @@ async function loadRouteVenueData(stop) {{
     var ih = '';
     var phone = v['Phone'] || '';
     var website = v['Website'] || '';
-    var fu = v['Follow-Up Date'] || '';
     var notesRaw = v['Notes'] || '';
     var _placeId = v['Google Place ID'] || '';
     var gmUrl = v['Google Maps URL'] || (_placeId ? 'https://www.google.com/maps/place/?q=place_id:' + _placeId : '');
@@ -1014,19 +901,6 @@ async function loadRouteVenueData(stop) {{
     if (gmUrl) ih += '<div style="margin-bottom:8px"><a href="'+esc(gmUrl)+'" target="_blank" style="color:#3b82f6;font-size:12px">Google Maps \u2197</a></div>';
     if (companyId) ih += '<div style="margin-bottom:8px"><a href="/company/'+companyId+'" style="color:#3b82f6;font-size:13px;font-weight:600">View full profile \u2192</a></div>';
     ih += '<hr style="border:none;border-top:1px solid var(--border);margin:10px 0">';
-    ih += '<div class="m-sheet-lbl">Contact Status</div>';
-    var stOpts = IS_ADMIN ? ['Not Contacted','Contacted','In Discussion','Active Partner'] : ['Not Contacted','Contacted','In Discussion'];
-    var curSt = (v['Contact Status'] && v['Contact Status'].value) || v['Contact Status'] || '';
-    ih += '<select onchange="updateRouteVenueStatus('+venueId+',this.value)" style="width:100%;background:var(--bg);border:1px solid var(--border);color:var(--text1);border-radius:8px;padding:8px 10px;font-size:14px;margin-bottom:10px"' + (curSt==='Active Partner' && !IS_ADMIN ? ' disabled' : '') + '>';
-    stOpts.forEach(function(s) {{ ih += '<option'+(curSt===s?' selected':'')+'>'+s+'</option>'; }});
-    ih += '</select>';
-    // ── Follow-Up Date ──────────────────────────────────────────────
-    ih += '<div class="m-sheet-lbl">\U0001f5d3\ufe0f Follow-Up Date</div>';
-    ih += '<div style="display:flex;gap:6px;margin-bottom:4px">';
-    ih += '<input type="date" id="rv-fu-'+id+'" value="'+esc(fu)+'" style="flex:1;background:var(--bg);border:1px solid var(--border);color:var(--text1);border-radius:8px;padding:8px 10px;font-size:14px">';
-    ih += '<button onclick="mRouteSaveFollowUp()" style="background:#3b82f6;color:#fff;border:none;border-radius:8px;padding:8px 14px;font-size:13px;font-weight:600;cursor:pointer;min-width:60px;min-height:40px">Save</button>';
-    ih += '</div>';
-    ih += '<div id="rv-fu-st-'+id+'" style="font-size:11px;margin-bottom:10px;min-height:14px"></div>';
     // ── Notes (read + add) ──────────────────────────────────────────
     ih += '<div class="m-sheet-lbl">\U0001f4dd Notes</div>';
     ih += '<div id="rv-notes-display-'+id+'" style="max-height:120px;overflow-y:auto;background:var(--card);border-radius:8px;padding:8px 10px;border:1px solid var(--border);font-size:13px;margin-bottom:6px">';
@@ -1198,13 +1072,6 @@ function renderNotesM(text) {{
     if (m) return '<div style="padding:4px 0;border-bottom:1px solid var(--border)"><div style="font-size:10px;color:var(--text3)">'+m[1]+'</div><div style="font-size:13px">'+esc(m[2].trim())+'</div></div>';
     return '<div style="padding:4px 0;font-size:13px">'+esc(entry.trim())+'</div>';
   }}).join('');
-}}
-
-async function updateRouteVenueStatus(venueId, val) {{
-  await fetch(BR + '/api/database/rows/table/' + _GGOR_VENUES + '/' + venueId + '/?user_field_names=true', {{
-    method: 'PATCH', headers: {{'Authorization':'Token '+BT,'Content-Type':'application/json'}},
-    body: JSON.stringify({{'Contact Status': {{value: val}}}})
-  }});
 }}
 
 var _pendingCheckInStopId = null;
@@ -1411,21 +1278,6 @@ async function updateBoxDays(boxId) {{
 }}
 
 // ── Field-rep quick-edit handlers (Contact.* backed) ───────────────────────
-async function mRouteSaveFollowUp() {{
-  var stop = _rCurrentStop; if (!stop || !stop.venue_id) return;
-  var venueId = stop.venue_id, id = stop.stop_id;
-  var inEl = document.getElementById('rv-fu-' + id);
-  var stEl = document.getElementById('rv-fu-st-' + id);
-  var val = inEl ? (inEl.value || null) : null;
-  if (stEl) {{ stEl.textContent = 'Saving\u2026'; stEl.style.color = 'var(--text3)'; }}
-  var res = await Contact.saveFollowUp('gorilla', venueId, val);
-  if (stEl) {{
-    stEl.textContent = res.ok ? '\u2713 Saved' : '\u2717 Failed';
-    stEl.style.color = res.ok ? '#059669' : '#ef4444';
-    setTimeout(function() {{ if (stEl) stEl.textContent = ''; }}, 2000);
-  }}
-}}
-
 async function mRouteAddNote() {{
   var stop = _rCurrentStop; if (!stop || !stop.venue_id) return;
   var venueId = stop.venue_id, id = stop.stop_id;
@@ -1490,6 +1342,13 @@ setTimeout(_pingRepLocation, 5000);
 loadRoute();
 """
     admin = _is_admin(user or {})
+    # After a lead-modal save, re-render the current stop sheet so the
+    # leads list / briefing card pick up the edits.
+    after_save_js = (
+        "window._afterLeadSave = function() { "
+        "if (typeof _rCurrentStop !== 'undefined' && _rCurrentStop) "
+        "loadRouteVenueData(_rCurrentStop); };\n"
+    )
     script_js = (
         f"const GFR_USER={repr(user_name)};\n"
         f"const TOOL = {{venuesT: {T_GOR_VENUES}}};\n"
@@ -1497,6 +1356,8 @@ loadRoute();
         f"const _TOOL_KEY = 'gorilla';\n"
         + contact_actions_js() + "\n"
         + route_js
+        + LEAD_MODAL_JS
+        + after_save_js
     )
     return _mobile_page('m_route', 'My Route', body, script_js, br, bt, user=user, wrap_cls='map-mode',
                          extra_html=GFR_EXTRA_HTML + LEAD_CAPTURE_HTML,

@@ -64,7 +64,10 @@ from .constants import (
     _TEMPLATES_JS,
 )
 from .nav import _topnav
-from .shells import _forbidden_page, _mobile_page, _page, _tool_page
+from .shells import (
+    _forbidden_page, _mobile_page, _page, _tool_page,
+    LEAD_MODAL_HTML, LEAD_MODAL_JS,
+)
 from .styles import _CSS, _JS_SHARED
 
 __all__ = [
@@ -89,4 +92,5 @@ __all__ = [
     "_COMPOSE_HTML", "_COMPOSE_JS",
     # shells
     "_page", "_forbidden_page", "_mobile_page", "_tool_page",
+    "LEAD_MODAL_HTML", "LEAD_MODAL_JS",
 ]

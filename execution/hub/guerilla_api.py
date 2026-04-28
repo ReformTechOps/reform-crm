@@ -1074,6 +1074,7 @@ async def capture_lead(
         "Status": "New",
         "Source": source,
         "Reason": service,
+        "Owner": (user.get("email", "") or "").strip(),
     }
     if email:
         fields["Email"] = email

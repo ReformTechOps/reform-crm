@@ -214,6 +214,142 @@ def _mobile_page(active: str, title: str, body_html: str, script_js: str,
         '</body></html>'
     )
 
+
+# ─── Lead detail modal (shared across mobile pages) ──────────────────────────
+# Host pages drop LEAD_MODAL_HTML into their body and concat LEAD_MODAL_JS onto
+# their script body. After save, the modal calls window._afterLeadSave() if
+# defined, so each host can wire its own list/refresh.
+LEAD_MODAL_HTML = (
+    '<div id="lead-modal-bg" onclick="if(event.target===this)closeLeadModal()" '
+    'style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:1100;'
+    'align-items:flex-start;justify-content:center;padding:30px 14px;overflow-y:auto">'
+    '<div style="background:var(--bg2);border:1px solid var(--border);border-radius:14px;'
+    'width:100%;max-width:480px;padding:18px 20px calc(20px + env(safe-area-inset-bottom))">'
+    '<div style="display:flex;align-items:center;gap:10px;margin-bottom:14px">'
+    '<h3 style="margin:0;color:var(--text);font-size:16px;flex:1">Lead</h3>'
+    '<button onclick="closeLeadModal()" style="background:none;border:none;color:var(--text3);'
+    'font-size:18px;cursor:pointer;padding:4px 8px">×</button>'
+    '</div>'
+    '<div id="lead-modal-body" style="font-size:13px;color:var(--text2)">Loading…</div>'
+    '<div id="lead-modal-msg" style="font-size:12px;min-height:16px;margin-top:8px"></div>'
+    '<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:10px">'
+    '<button onclick="closeLeadModal()" '
+    'style="padding:9px 16px;background:none;border:1px solid var(--border);color:var(--text2);'
+    'border-radius:6px;font-size:13px;cursor:pointer;font-family:inherit">Cancel</button>'
+    '<button id="lead-modal-save" onclick="saveLeadModal()" '
+    'style="padding:9px 20px;background:#059669;border:none;color:#fff;border-radius:6px;'
+    'font-size:13px;font-weight:700;cursor:pointer;font-family:inherit">Save</button>'
+    '</div>'
+    '</div>'
+    '</div>'
+)
+
+# Plain string (single braces) — host pages concat AFTER their f-string JS
+# bodies so they don't need to escape every `{` to `{{`.
+LEAD_MODAL_JS = r"""
+// ── Lead detail modal (shared) ──────────────────────────────────────────
+let _leadModalId = null;
+
+async function openLeadModal(leadId) {
+  _leadModalId = leadId;
+  document.getElementById('lead-modal-msg').textContent = '';
+  document.getElementById('lead-modal-body').textContent = 'Loading…';
+  document.getElementById('lead-modal-bg').style.display = 'flex';
+  document.body.style.overflow = 'hidden';
+  try {
+    var r = await fetch('/api/leads/' + leadId);
+    if (!r.ok) {
+      document.getElementById('lead-modal-body').innerHTML =
+        '<div style="color:#ef4444">Failed to load lead (HTTP ' + r.status + ')</div>';
+      return;
+    }
+    var L = await r.json();
+    var stages = ['New','Contacted','Appointment Set','Patient Seen','Converted','Dropped'];
+    var st = (L.Status && L.Status.value) || L.Status || 'New';
+    var rs = (L.Reason && L.Reason.value) || L.Reason || '';
+    function row(label, html) {
+      return '<div style="margin-bottom:10px">'
+        + '<label style="display:block;font-size:10px;font-weight:700;color:var(--text3);'
+        + 'text-transform:uppercase;letter-spacing:.4px;margin-bottom:4px">' + esc(label) + '</label>'
+        + html + '</div>';
+    }
+    var inputCss = 'width:100%;padding:9px;background:var(--bg);border:1px solid var(--border);'
+                 + 'color:var(--text);border-radius:6px;font-size:13px;font-family:inherit';
+    var stageOpts = stages.map(function(s){
+      return '<option value="' + esc(s) + '"' + (s === st ? ' selected' : '') + '>' + esc(s) + '</option>';
+    }).join('');
+    var html = ''
+      + row('Name', '<input type="text" id="lm-name" style="' + inputCss + '" value="' + esc(L.Name || '') + '">')
+      + row('Phone', '<input type="tel" id="lm-phone" style="' + inputCss + '" value="' + esc(L.Phone || '') + '">')
+      + row('Email', '<input type="email" id="lm-email" style="' + inputCss + '" value="' + esc(L.Email || '') + '">')
+      + row('Status', '<select id="lm-status" style="' + inputCss + '">' + stageOpts + '</select>')
+      + row('Reason / Service', '<input type="text" id="lm-reason" style="' + inputCss + '" value="' + esc(rs) + '">')
+      + row('Source', '<input type="text" id="lm-source" style="' + inputCss + ';opacity:.7" value="' + esc(L.Source || '') + '" readonly>')
+      + row('Follow-Up Date', '<input type="date" id="lm-fu" style="' + inputCss + '" value="' + esc((L['Follow-Up Date'] || '').slice(0,10)) + '">')
+      + row('Notes', '<textarea id="lm-notes" rows="3" style="' + inputCss + ';resize:vertical">' + esc(L.Notes || '') + '</textarea>')
+      + '<div style="font-size:11px;color:var(--text3);margin-top:6px">Created: ' + esc((L.Created || '').slice(0,10) || '—')
+      + (L.Owner ? ' · Owner: ' + esc(L.Owner) : '') + '</div>';
+    document.getElementById('lead-modal-body').innerHTML = html;
+    var phEl = document.getElementById('lm-phone');
+    if (phEl && typeof formatPhone === 'function') formatPhone(phEl);
+  } catch (e) {
+    document.getElementById('lead-modal-body').innerHTML =
+      '<div style="color:#ef4444">Network error: ' + esc(e.message || e) + '</div>';
+  }
+}
+
+function closeLeadModal() {
+  document.getElementById('lead-modal-bg').style.display = 'none';
+  document.body.style.overflow = '';
+  _leadModalId = null;
+}
+
+async function saveLeadModal() {
+  if (!_leadModalId) return;
+  var msg = document.getElementById('lead-modal-msg');
+  var btn = document.getElementById('lead-modal-save');
+  msg.textContent = '';
+  btn.disabled = true; btn.textContent = 'Saving…';
+  var get = function(id) { var el = document.getElementById(id); return el ? el.value.trim() : ''; };
+  var payload = {
+    'Name':   get('lm-name'),
+    'Phone':  get('lm-phone'),
+    'Email':  get('lm-email'),
+    'Status': get('lm-status'),
+    'Reason': get('lm-reason'),
+    'Notes':  get('lm-notes'),
+  };
+  var fu = get('lm-fu');
+  payload['Follow-Up Date'] = fu || null;
+  try {
+    var r = await fetch('/api/leads/' + _leadModalId, {
+      method: 'PATCH',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(payload),
+    });
+    if (!r.ok) {
+      var err = '';
+      try { err = (await r.json()).error || ''; } catch (e) {}
+      msg.style.color = '#ef4444';
+      msg.textContent = 'Save failed: ' + (err || ('HTTP ' + r.status));
+      btn.disabled = false; btn.textContent = 'Save';
+      return;
+    }
+    msg.style.color = '#059669';
+    msg.textContent = 'Saved ✓';
+    setTimeout(function() {
+      closeLeadModal();
+      if (typeof window._afterLeadSave === 'function') window._afterLeadSave();
+    }, 600);
+  } catch (e) {
+    msg.style.color = '#ef4444';
+    msg.textContent = 'Network error';
+    btn.disabled = false; btn.textContent = 'Save';
+  }
+}
+"""
+
+
 # ─── Tool Dashboard ───────────────────────────────────────────────────────────
 _TOOL_BODY = """
 <div class="stats-row" id="stats-row">
