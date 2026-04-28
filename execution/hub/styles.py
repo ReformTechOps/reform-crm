@@ -411,7 +411,9 @@ body.login-body { display:block; }
 .m-drawer { position:fixed; top:0; right:0; bottom:0; width:280px; max-width:85vw;
             background:var(--bg2); border-left:1px solid var(--border); z-index:900;
             transform:translateX(100%); transition:transform .25s ease; overflow-y:auto;
-            padding:16px 0; }
+            /* iOS standalone PWA: pad top by safe-area so the drawer header sits
+               below the notch / Dynamic Island, and bottom for the home indicator. */
+            padding:calc(16px + env(safe-area-inset-top)) 0 calc(16px + env(safe-area-inset-bottom)); }
 .m-drawer.open { transform:translateX(0); }
 .m-drawer-hdr { display:flex; justify-content:space-between; align-items:center;
                 padding:0 16px 12px; border-bottom:1px solid var(--border); margin-bottom:8px; }
