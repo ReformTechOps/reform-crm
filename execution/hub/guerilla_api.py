@@ -357,6 +357,22 @@ async def guerilla_log(request: Request, br: str, bt: str, user: dict,
             valid_statuses = {"Prospective", "Approved", "Scheduled", "Completed"}
             if event_status in valid_statuses:
                 act_fields["Event Status"] = event_status
+        # Optional sentiment / photo / audio / transcript (added 2026-04-28
+        # alongside the s2 Check-In sentiment/voice/photo features).
+        # T_GOR_ACTS columns: Sentiment (single_select Green/Yellow/Red),
+        # Photo URL, Audio URL, Transcript. Bare string for the single_select.
+        sentiment = (fields.get("sentiment") or "").strip()
+        if sentiment in ("Green", "Yellow", "Red"):
+            act_fields["Sentiment"] = sentiment
+        photo_url = (fields.get("photo_url") or "").strip()
+        if photo_url:
+            act_fields["Photo URL"] = photo_url
+        audio_url = (fields.get("audio_url") or "").strip()
+        if audio_url:
+            act_fields["Audio URL"] = audio_url
+        transcript = (fields.get("transcript") or "").strip()
+        if transcript:
+            act_fields["Transcript"] = transcript
 
         ar = await client.post(
             f"{br}/api/database/rows/table/{T_GOR_ACTS}/?user_field_names=true",

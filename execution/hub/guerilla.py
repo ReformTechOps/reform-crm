@@ -790,6 +790,50 @@ _GFR_FORM2_HTML = (
     '</div>'
     '<div class="gfr-field"><label class="gfr-label">What happened? <span class="req">*</span></label>'
     '<textarea class="gfr-textarea" id="s2-int-summary" placeholder="Describe the interaction\u2026"></textarea></div>'
+    # \u2500\u2500 Sentiment \ud83d\udfe2/\ud83d\udfe1/\ud83d\udd34 \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
+    '<div class="gfr-field"><label class="gfr-label">How did it go? <span style="font-weight:400;color:var(--text3)">(optional)</span></label>'
+    '<div id="s2-sentiment-row" style="display:flex;gap:6px">'
+    '<button type="button" data-sent="Green"  onclick="setS2Sentiment(\'Green\')"  '
+    'style="flex:1;padding:8px;background:var(--bg);border:1px solid var(--border);'
+    'color:var(--text);border-radius:6px;font-size:13px;cursor:pointer;font-family:inherit">\ud83d\udfe2 Good</button>'
+    '<button type="button" data-sent="Yellow" onclick="setS2Sentiment(\'Yellow\')" '
+    'style="flex:1;padding:8px;background:var(--bg);border:1px solid var(--border);'
+    'color:var(--text);border-radius:6px;font-size:13px;cursor:pointer;font-family:inherit">\ud83d\udfe1 Mixed</button>'
+    '<button type="button" data-sent="Red"    onclick="setS2Sentiment(\'Red\')"    '
+    'style="flex:1;padding:8px;background:var(--bg);border:1px solid var(--border);'
+    'color:var(--text);border-radius:6px;font-size:13px;cursor:pointer;font-family:inherit">\ud83d\udd34 Bad</button>'
+    '</div></div>'
+    # \u2500\u2500 Voice note (record \u2192 transcribe \u2192 fills Notes) \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
+    '<div class="gfr-field"><label class="gfr-label">Voice note <span style="font-weight:400;color:var(--text3)">(optional)</span></label>'
+    '<div id="s2-voice-row">'
+    '<button type="button" id="s2-voice-btn" onclick="toggleS2VoiceNote()" '
+    'style="display:inline-flex;align-items:center;gap:6px;padding:8px 12px;background:var(--bg);'
+    'border:1px solid var(--border);color:var(--text2);border-radius:6px;font-size:13px;cursor:pointer;font-family:inherit">'
+    '\ud83c\udfa4 Record</button>'
+    '<span id="s2-voice-st" style="margin-left:8px;font-size:11px;color:var(--text3)"></span>'
+    '<div id="s2-voice-preview" style="display:none;margin-top:8px">'
+    '<audio id="s2-voice-audio" controls style="width:100%;height:36px"></audio>'
+    '<button type="button" onclick="clearS2VoiceNote()" '
+    'style="margin-top:4px;padding:4px 10px;background:none;border:1px solid var(--border);'
+    'color:var(--text3);border-radius:6px;font-size:11px;cursor:pointer">Discard</button>'
+    '</div>'
+    '</div></div>'
+    # \u2500\u2500 Photo capture \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
+    '<div class="gfr-field"><label class="gfr-label">Photo <span style="font-weight:400;color:var(--text3)">(optional)</span></label>'
+    '<div id="s2-photo-row">'
+    '<label for="s2-photo-input" id="s2-photo-pick" '
+    'style="display:inline-flex;align-items:center;gap:6px;padding:8px 12px;background:var(--bg);'
+    'border:1px solid var(--border);color:var(--text2);border-radius:6px;font-size:13px;cursor:pointer">'
+    '\ud83d\udcf7 Add photo</label>'
+    '<input type="file" id="s2-photo-input" accept="image/*" capture="environment" '
+    'onchange="onS2PhotoPicked(event)" style="display:none">'
+    '<div id="s2-photo-preview" style="display:none;margin-top:8px;position:relative">'
+    '<img id="s2-photo-img" style="max-width:100%;max-height:160px;border-radius:6px;border:1px solid var(--border)">'
+    '<button type="button" onclick="clearS2Photo()" '
+    'style="position:absolute;top:4px;right:4px;background:rgba(0,0,0,.6);color:#fff;border:none;'
+    'border-radius:50%;width:24px;height:24px;font-size:14px;cursor:pointer;line-height:1">\u00d7</button>'
+    '</div>'
+    '</div></div>'
     # Optional: update the venue\'s Contact Status as part of this submit
     '<div class="gfr-field"><label class="gfr-label">Update Contact Status <span style="font-weight:400;color:var(--text3)">(optional)</span></label>'
     '<select class="gfr-select" id="s2-contact-status">'
@@ -1044,6 +1088,145 @@ async function s5Submit(){
 }
 
 // -- Form 2: External Event / Interaction Only ----------------------------
+// ── s2 Check-In: optional sentiment/voice/photo helpers ──────────────────
+let _s2VoiceRecorder = null;
+let _s2VoiceChunks = [];
+let _s2VoiceBlob = null;
+let _s2VoiceUrl = '';
+let _s2VoiceTranscript = '';
+let _s2VoiceTimer = null;
+let _s2VoiceStartedAt = 0;
+let _s2Sentiment = '';
+let _s2PhotoFile = null;
+const _S2_VOICE_MAX_MS = 90000;
+const _S2_SENT_COLORS = { Green: '#059669', Yellow: '#f59e0b', Red: '#ef4444' };
+
+function setS2Sentiment(val){
+  _s2Sentiment = (_s2Sentiment === val) ? '' : val;
+  document.querySelectorAll('#s2-sentiment-row button').forEach(function(b){
+    var v = b.getAttribute('data-sent');
+    var on = (v === _s2Sentiment);
+    b.style.background  = on ? _S2_SENT_COLORS[v] : 'var(--bg)';
+    b.style.color       = on ? '#fff'              : 'var(--text)';
+    b.style.borderColor = on ? _S2_SENT_COLORS[v] : 'var(--border)';
+  });
+}
+
+function clearS2VoiceNote(){
+  _s2VoiceBlob = null; _s2VoiceUrl = ''; _s2VoiceTranscript = '';
+  var prev = document.getElementById('s2-voice-preview'); if (prev) prev.style.display = 'none';
+  var au = document.getElementById('s2-voice-audio');     if (au) au.src = '';
+  var btn = document.getElementById('s2-voice-btn');      if (btn) btn.textContent = '🎤 Record';
+  var st = document.getElementById('s2-voice-st');        if (st) st.textContent = '';
+}
+
+async function toggleS2VoiceNote(){
+  var btn = document.getElementById('s2-voice-btn');
+  var st  = document.getElementById('s2-voice-st');
+  if (_s2VoiceRecorder && _s2VoiceRecorder.state === 'recording') {
+    _s2VoiceRecorder.stop();
+    return;
+  }
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+    alert('Mic recording is not supported on this device/browser.');
+    return;
+  }
+  try {
+    var stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    var mime = MediaRecorder.isTypeSupported('audio/webm;codecs=opus') ? 'audio/webm;codecs=opus'
+              : MediaRecorder.isTypeSupported('audio/webm') ? 'audio/webm'
+              : MediaRecorder.isTypeSupported('audio/mp4') ? 'audio/mp4' : '';
+    _s2VoiceRecorder = new MediaRecorder(stream, mime ? { mimeType: mime } : undefined);
+    _s2VoiceChunks = [];
+    _s2VoiceRecorder.ondataavailable = function(e) {
+      if (e.data && e.data.size > 0) _s2VoiceChunks.push(e.data);
+    };
+    _s2VoiceRecorder.onstop = async function(){
+      stream.getTracks().forEach(function(t){ t.stop(); });
+      if (_s2VoiceTimer) { clearInterval(_s2VoiceTimer); _s2VoiceTimer = null; }
+      _s2VoiceBlob = new Blob(_s2VoiceChunks, { type: mime || 'audio/webm' });
+      btn.textContent = '🎤 Record again';
+      btn.style.background = 'var(--bg)';
+      btn.style.color = 'var(--text2)';
+      st.textContent = 'Transcribing…';
+      var fd = new FormData();
+      var ext = (mime && mime.indexOf('mp4') !== -1) ? 'mp4' : 'webm';
+      fd.append('audio', _s2VoiceBlob, 'recording.' + ext);
+      try {
+        var r = await fetch('/api/activities/transcribe', { method: 'POST', body: fd });
+        if (!r.ok) {
+          st.textContent = 'Transcription failed (HTTP ' + r.status + ')';
+          st.style.color = '#ef4444';
+          return;
+        }
+        var d = await r.json();
+        _s2VoiceUrl = d.audio_url || '';
+        _s2VoiceTranscript = d.transcript || '';
+        if (_s2VoiceUrl) {
+          var au = document.getElementById('s2-voice-audio');
+          au.src = _s2VoiceUrl;
+          document.getElementById('s2-voice-preview').style.display = 'block';
+        }
+        if (_s2VoiceTranscript) {
+          var ta = document.getElementById('s2-int-summary');
+          if (ta.value.trim()) {
+            ta.value = ta.value.trimEnd() + '\n\n' + _s2VoiceTranscript;
+          } else {
+            ta.value = _s2VoiceTranscript;
+          }
+          st.style.color = '#059669';
+          st.textContent = '✓ Transcribed';
+        } else if (d.error) {
+          st.style.color = '#ef4444';
+          st.textContent = d.error;
+        } else {
+          st.style.color = '#f59e0b';
+          st.textContent = 'No transcript returned';
+        }
+      } catch (e) {
+        st.style.color = '#ef4444';
+        st.textContent = 'Network error';
+      }
+    };
+    _s2VoiceRecorder.start();
+    _s2VoiceStartedAt = Date.now();
+    btn.textContent = '⏹ Stop';
+    btn.style.background = '#ef4444';
+    btn.style.color = '#fff';
+    st.style.color = 'var(--text3)';
+    st.textContent = '0:00';
+    _s2VoiceTimer = setInterval(function() {
+      var s = Math.floor((Date.now() - _s2VoiceStartedAt) / 1000);
+      st.textContent = Math.floor(s/60) + ':' + String(s%60).padStart(2,'0');
+      if (Date.now() - _s2VoiceStartedAt >= _S2_VOICE_MAX_MS && _s2VoiceRecorder.state === 'recording') {
+        _s2VoiceRecorder.stop();
+      }
+    }, 250);
+  } catch (e) {
+    alert('Could not access mic: ' + (e.message || e));
+  }
+}
+
+function onS2PhotoPicked(e){
+  var f = e.target.files && e.target.files[0];
+  if (!f) return;
+  _s2PhotoFile = f;
+  var reader = new FileReader();
+  reader.onload = function(ev){
+    document.getElementById('s2-photo-img').src = ev.target.result;
+    document.getElementById('s2-photo-preview').style.display = 'block';
+    document.getElementById('s2-photo-pick').textContent = '📷 Replace photo';
+  };
+  reader.readAsDataURL(f);
+}
+
+function clearS2Photo(){
+  _s2PhotoFile = null;
+  var inp = document.getElementById('s2-photo-input');     if (inp) inp.value = '';
+  var prev = document.getElementById('s2-photo-preview');  if (prev) prev.style.display = 'none';
+  var pick = document.getElementById('s2-photo-pick');     if (pick) pick.textContent = '📷 Add photo';
+}
+
 function s2ToggleEvent(){
   var cb=document.getElementById('s2-has-event');
   var block=document.getElementById('s2-event-block');
@@ -1054,7 +1237,7 @@ function s2Reset(){
    's2-duration','s2-addr','s2-date','s2-industry','s2-int-person','s2-int-fu','s2-int-summary'].forEach(function(id){
     var el=document.getElementById(id);if(el)el.value='';
   });
-  ['s2-inout','s2-elec','s2-hour','s2-min','s2-ampm','s2-status','s2-int-type','s2-int-outcome'].forEach(function(id){
+  ['s2-inout','s2-elec','s2-hour','s2-min','s2-ampm','s2-status','s2-int-type','s2-int-outcome','s2-contact-status'].forEach(function(id){
     var el=document.getElementById(id);if(el)el.selectedIndex=0;
   });
   document.querySelectorAll('input[name="s2-collar"],input[name="s2-hcare"]').forEach(function(r){r.checked=false;});
@@ -1066,6 +1249,10 @@ function s2Reset(){
   var foot=document.querySelector('#gfr-form-s2 .gfr-footer');if(foot)foot.style.display='';
   var btn=document.getElementById('s2-submit');if(btn){btn.disabled=false;btn.textContent='Submit';}
   document.getElementById('gfr-user-s2').textContent=GFR_USER;
+  _s2Sentiment = '';
+  setS2Sentiment('');
+  clearS2Photo();
+  clearS2VoiceNote();
 }
 async function s2Submit(){
   var btn=document.getElementById('s2-submit');
@@ -1097,6 +1284,12 @@ async function s2Submit(){
   var csEl = document.getElementById('s2-contact-status');
   var csVal = csEl ? csEl.value.trim() : '';
   if (csVal) fields.contact_status = csVal;
+  // Optional sentiment / voice / photo (added 2026-04-28). Photo URL is
+  // resolved by uploading to Bunny first; audio URL + transcript come from
+  // the /api/activities/transcribe call that ran when the rep tapped Stop.
+  if (_s2Sentiment) fields.sentiment = _s2Sentiment;
+  if (_s2VoiceUrl) fields.audio_url = _s2VoiceUrl;
+  if (_s2VoiceTranscript) fields.transcript = _s2VoiceTranscript;
   var formType='Interaction Only';
   var flyer=null;
 
@@ -1128,6 +1321,30 @@ async function s2Submit(){
   }
 
   btn.disabled=true;btn.textContent='Submitting\u2026';
+  // Upload activity photo first (if any) so the resulting URL can ride
+  // along in `fields.photo_url`. Skipped silently when no photo picked.
+  if (_s2PhotoFile) {
+    btn.textContent = 'Uploading photo\u2026';
+    var pfd = new FormData();
+    pfd.append('photo', _s2PhotoFile);
+    if (window._routeCheckInVenueId) pfd.append('venue_id', window._routeCheckInVenueId);
+    try {
+      var pr = await fetch('/api/activities/photo', { method: 'POST', body: pfd });
+      if (pr.ok) {
+        var pj = await pr.json();
+        if (pj.url) fields.photo_url = pj.url;
+      } else {
+        alert('Photo upload failed (HTTP ' + pr.status + '). Submit cancelled.');
+        btn.disabled=false; btn.textContent='Submit';
+        return;
+      }
+    } catch (e) {
+      alert('Photo upload network error. Submit cancelled.');
+      btn.disabled=false; btn.textContent='Submit';
+      return;
+    }
+    btn.textContent = 'Submitting\u2026';
+  }
   try{
     var r;
     if(flyer){

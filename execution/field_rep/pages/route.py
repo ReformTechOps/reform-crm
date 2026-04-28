@@ -6,7 +6,6 @@ from hub.shared import (
     _mobile_page, _is_admin,
     T_GOR_VENUES, T_GOR_ACTS, T_GOR_BOXES, T_COMPANIES, T_EVENTS, T_LEADS,
     LEAD_MODAL_HTML, LEAD_MODAL_JS,
-    LOG_ACTIVITY_MODAL_HTML, LOG_ACTIVITY_MODAL_JS,
 )
 from hub.guerilla import GFR_EXTRA_HTML, GFR_EXTRA_JS
 from hub.contact_detail import contact_actions_js
@@ -84,8 +83,6 @@ def _mobile_route_page(br: str, bt: str, user: dict = None,
         'max-width:60vw;text-align:left;line-height:1.2"></button>'
         # Lead detail / edit modal — shared snippet defined in hub.shells
         + LEAD_MODAL_HTML
-        # Log Activity modal — shared snippet, used by route Check-In
-        + LOG_ACTIVITY_MODAL_HTML
     )
     route_js = f"""
 const RGK = {repr(gk)};
@@ -813,9 +810,6 @@ async function loadRouteVenueData(stop) {{
   if (!v) return;
   var id = stop.stop_id;
   var companyId = buildVenueCompanyMap(companies)[venueId];
-  // Stash for the Check-In flow so routeCheckInForm() can pass company_id
-  // to the shared Log Activity modal without re-resolving it.
-  window._currentStopCompanyId = companyId || null;
 
   // Pull T_ACTIVITIES rows for the linked company so sentiment + photos
   // logged via the company-detail composer show up in this venue's history.
@@ -1107,21 +1101,10 @@ function routeCheckInForm() {{
   // _rCurrentStop, and reading .name on null in the setTimeout callback
   // would throw and prevent the form from ever opening.
   var stop = _rCurrentStop;
-  var companyId = window._currentStopCompanyId || null;
-
-  // Preferred path: open the shared Log Activity modal (writes to
-  // T_ACTIVITIES via /api/companies/{id}/activities) so the activity
-  // surfaces on the company profile too.
-  if (companyId) {{
-    closeRouteSheet();
-    setTimeout(function() {{
-      openLogModal({{company_id: companyId, business_name: stop.name || ''}});
-    }}, 150);
-    return;
-  }}
-
-  // Fallback: legacy guerilla venue with no T_COMPANIES row → use s2 so
-  // the activity at least lands in T_GOR_ACTS and shows in route history.
+  // Stash venue id + name so s2Submit can pass them to /api/guerilla/log.
+  // Without this, guerilla_log can't link the activity to the venue (the s2
+  // 'Interaction Only' form_type doesn't trigger the name-based lookup) and
+  // the activity never appears in this stop's Visit History.
   window._routeCheckInVenueId = stop.venue_id || null;
   window._routeCheckInBusinessName = stop.name || '';
   window._routeCheckInStopId = stop.stop_id || null;
@@ -1365,16 +1348,6 @@ loadRoute();
         "window._afterLeadSave = function() { "
         "if (typeof _rCurrentStop !== 'undefined' && _rCurrentStop) "
         "loadRouteVenueData(_rCurrentStop); };\n"
-        # After a Check-In via the Log Activity modal, mark the stop Visited
-        # (preserves the existing Arrive → Check In → Visited flow) and
-        # reload the stop sheet so the new activity shows in Visit History.
-        "window._afterLogActivitySave = function() { "
-        "if (typeof _pendingCheckInStopId !== 'undefined' && _pendingCheckInStopId) { "
-        "  markRouteStop(_pendingCheckInStopId, 'Visited', null); "
-        "  _pendingCheckInStopId = null; "
-        "} "
-        "if (typeof _rCurrentStop !== 'undefined' && _rCurrentStop) "
-        "  loadRouteVenueData(_rCurrentStop); };\n"
     )
     script_js = (
         f"const GFR_USER={repr(user_name)};\n"
@@ -1384,7 +1357,6 @@ loadRoute();
         + contact_actions_js() + "\n"
         + route_js
         + LEAD_MODAL_JS
-        + LOG_ACTIVITY_MODAL_JS
         + after_save_js
     )
     return _mobile_page('m_route', 'My Route', body, script_js, br, bt, user=user, wrap_cls='map-mode',

@@ -205,6 +205,29 @@ async def upload_activity_photo(company_id: int, request: Request):
     )
 
 
+@router.post("/api/activities/photo")
+async def upload_generic_activity_photo(request: Request):
+    """Generic (non-company-scoped) photo upload for the s2 Check-In form.
+    Accepts a `venue_id` form field for the Bunny path prefix; reuses the
+    existing outreach_api.upload_activity_photo helper which only uses the
+    int it's given as a path component."""
+    session = await get_session(request)
+    if not session:
+        return JSONResponse({"error": "unauthenticated"}, status_code=401)
+    from hub import outreach_api
+    br, bt = _env()
+    bzone, bkey, bcdn = _bunny_env()
+    form = await request.form()
+    try:
+        venue_id = int(form.get("venue_id") or 0)
+    except (TypeError, ValueError):
+        venue_id = 0
+    return await outreach_api.upload_activity_photo(
+        request, br, bt, session, venue_id,
+        bunny_zone=bzone, bunny_key=bkey, bunny_cdn_base=bcdn,
+    )
+
+
 @router.post("/api/activities/transcribe")
 async def transcribe_activity_audio(request: Request):
     session = await get_session(request)
