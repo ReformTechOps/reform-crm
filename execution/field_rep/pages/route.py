@@ -102,7 +102,7 @@ var _allBoxesCache = null;  // cached boxes for pickup badges
 // "What Happened" portion if present, else the full summary.
 function _cleanNote(s) {{
   if (!s) return '';
-  var m = s.match(/What Happened:\s*([\s\S]*?)(?:\n[A-Z][\\w \\-]+:\s|$)/);
+  var m = s.match(/What Happened:\\s*([\\s\\S]*?)(?:\\n[A-Z][\\w \\-]+:\\s|$)/);
   if (m && m[1]) return m[1].trim();
   return s.trim();
 }}
