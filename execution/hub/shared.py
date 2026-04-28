@@ -67,6 +67,7 @@ from .nav import _topnav
 from .shells import (
     _forbidden_page, _mobile_page, _page, _tool_page,
     LEAD_MODAL_HTML, LEAD_MODAL_JS,
+    LOG_ACTIVITY_MODAL_HTML, LOG_ACTIVITY_MODAL_JS,
 )
 from .styles import _CSS, _JS_SHARED
 
@@ -93,4 +94,5 @@ __all__ = [
     # shells
     "_page", "_forbidden_page", "_mobile_page", "_tool_page",
     "LEAD_MODAL_HTML", "LEAD_MODAL_JS",
+    "LOG_ACTIVITY_MODAL_HTML", "LOG_ACTIVITY_MODAL_JS",
 ]

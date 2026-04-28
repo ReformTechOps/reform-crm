@@ -5,6 +5,7 @@ import os
 from hub.shared import (
     _mobile_page,
     T_COMPANIES, T_LEADS, T_ACTIVITIES, T_GOR_BOXES,
+    LOG_ACTIVITY_MODAL_HTML, LOG_ACTIVITY_MODAL_JS,
 )
 from hub.guerilla import GFR_EXTRA_HTML, GFR_EXTRA_JS
 from hub.lead_capture_ui import LEAD_CAPTURE_HTML, build_lead_capture_js
@@ -83,102 +84,8 @@ def _mobile_company_detail_page(br: str, bt: str, company_id: int,
         '<div id="cd-box-form"></div>'
         '</div>'
         '</div>'  # end mobile-body
-        # Log-activity modal (unchanged from previous flat page)
-        '<div id="cd-modal-bg" onclick="if(event.target===this)closeLogModal()" '
-        'style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.6);z-index:900;'
-        'align-items:flex-start;justify-content:center;padding:40px 16px;overflow-y:auto">'
-        '<div style="background:var(--bg2);border:1px solid var(--border);border-radius:14px;'
-        'width:100%;max-width:480px;padding:20px">'
-        '<h3 style="margin:0 0 14px;color:var(--text);font-size:16px">Log activity</h3>'
-        '<label style="display:block;font-size:11px;font-weight:700;color:var(--text3);'
-        'text-transform:uppercase;margin-bottom:4px;letter-spacing:.4px">Type</label>'
-        '<select id="cd-type" style="width:100%;padding:9px;background:var(--bg);border:1px solid var(--border);'
-        'color:var(--text);border-radius:6px;font-size:13px;margin-bottom:12px">'
-        '<option value="Call">\U0001f4de Call</option>'
-        '<option value="Email">✉️ Email</option>'
-        '<option value="Drop Off">\U0001f4cd Drop-off</option>'
-        '<option value="Text">\U0001f4ac Text</option>'
-        '<option value="In Person">\U0001f91d In Person</option>'
-        '<option value="Other">Other</option>'
-        '</select>'
-        '<label style="display:block;font-size:11px;font-weight:700;color:var(--text3);'
-        'text-transform:uppercase;margin-bottom:4px;letter-spacing:.4px">Notes *</label>'
-        '<textarea id="cd-summary" rows="3" placeholder="What happened?" '
-        'style="width:100%;padding:9px;background:var(--bg);border:1px solid var(--border);'
-        'color:var(--text);border-radius:6px;font-size:13px;resize:vertical;font-family:inherit;margin-bottom:12px"></textarea>'
-        # Sentiment row (Green/Yellow/Red)
-        '<label style="display:block;font-size:11px;font-weight:700;color:var(--text3);'
-        'text-transform:uppercase;margin-bottom:4px;letter-spacing:.4px">How did it go?</label>'
-        '<div id="cd-sentiment-row" style="display:flex;gap:6px;margin-bottom:12px">'
-        '<button type="button" data-sent="Green"  onclick="setSentiment(\'Green\')"  '
-        'style="flex:1;padding:8px;background:var(--bg);border:1px solid var(--border);'
-        'color:var(--text);border-radius:6px;font-size:13px;cursor:pointer;font-family:inherit">🟢 Good</button>'
-        '<button type="button" data-sent="Yellow" onclick="setSentiment(\'Yellow\')" '
-        'style="flex:1;padding:8px;background:var(--bg);border:1px solid var(--border);'
-        'color:var(--text);border-radius:6px;font-size:13px;cursor:pointer;font-family:inherit">🟡 Mixed</button>'
-        '<button type="button" data-sent="Red"    onclick="setSentiment(\'Red\')"    '
-        'style="flex:1;padding:8px;background:var(--bg);border:1px solid var(--border);'
-        'color:var(--text);border-radius:6px;font-size:13px;cursor:pointer;font-family:inherit">🔴 Bad</button>'
-        '</div>'
-        # Voice note (records → transcribes → fills Notes textarea)
-        '<label style="display:block;font-size:11px;font-weight:700;color:var(--text3);'
-        'text-transform:uppercase;margin-bottom:4px;letter-spacing:.4px">Voice note (optional)</label>'
-        '<div id="cd-voice-row" style="margin-bottom:12px">'
-        '<button type="button" id="cd-voice-btn" onclick="toggleVoiceNote()" '
-        'style="display:inline-flex;align-items:center;gap:6px;padding:8px 12px;background:var(--bg);'
-        'border:1px solid var(--border);color:var(--text2);border-radius:6px;font-size:13px;cursor:pointer;font-family:inherit">'
-        '🎤 Record</button>'
-        '<span id="cd-voice-st" style="margin-left:8px;font-size:11px;color:var(--text3)"></span>'
-        '<div id="cd-voice-preview" style="display:none;margin-top:8px">'
-        '<audio id="cd-voice-audio" controls style="width:100%;height:36px"></audio>'
-        '<button type="button" onclick="clearVoiceNote()" '
-        'style="margin-top:4px;padding:4px 10px;background:none;border:1px solid var(--border);'
-        'color:var(--text3);border-radius:6px;font-size:11px;cursor:pointer">Discard</button>'
-        '</div>'
-        '</div>'
-        # Photo capture
-        '<label style="display:block;font-size:11px;font-weight:700;color:var(--text3);'
-        'text-transform:uppercase;margin-bottom:4px;letter-spacing:.4px">Photo (optional)</label>'
-        '<div id="cd-photo-row" style="margin-bottom:12px">'
-        '<label for="cd-photo-input" id="cd-photo-pick" '
-        'style="display:inline-flex;align-items:center;gap:6px;padding:8px 12px;background:var(--bg);'
-        'border:1px solid var(--border);color:var(--text2);border-radius:6px;font-size:13px;cursor:pointer">'
-        '📷 Add photo</label>'
-        '<input type="file" id="cd-photo-input" accept="image/*" capture="environment" '
-        'onchange="onPhotoPicked(event)" style="display:none">'
-        '<div id="cd-photo-preview" style="display:none;margin-top:8px;position:relative">'
-        '<img id="cd-photo-img" style="max-width:100%;max-height:160px;border-radius:6px;border:1px solid var(--border)">'
-        '<button type="button" onclick="clearPhoto()" '
-        'style="position:absolute;top:4px;right:4px;background:rgba(0,0,0,.6);color:#fff;border:none;'
-        'border-radius:50%;width:24px;height:24px;font-size:14px;cursor:pointer;line-height:1">×</button>'
-        '</div>'
-        '</div>'
-        '<label style="display:block;font-size:11px;font-weight:700;color:var(--text3);'
-        'text-transform:uppercase;margin-bottom:4px;letter-spacing:.4px">Next follow-up</label>'
-        '<input type="date" id="cd-fu" '
-        'style="width:100%;padding:9px;background:var(--bg);border:1px solid var(--border);'
-        'color:var(--text);border-radius:6px;font-size:13px;margin-bottom:12px;font-family:inherit">'
-        '<label style="display:block;font-size:11px;font-weight:700;color:var(--text3);'
-        'text-transform:uppercase;margin-bottom:4px;letter-spacing:.4px">New status (optional)</label>'
-        '<select id="cd-status" style="width:100%;padding:9px;background:var(--bg);border:1px solid var(--border);'
-        'color:var(--text);border-radius:6px;font-size:13px;margin-bottom:14px">'
-        '<option value="">(keep current)</option>'
-        '<option value="Not Contacted">Not Contacted</option>'
-        '<option value="Contacted">Contacted</option>'
-        '<option value="In Discussion">In Discussion</option>'
-        '<option value="Active Partner">Active Partner</option>'
-        '</select>'
-        '<div id="cd-modal-msg" style="font-size:12px;min-height:14px;margin-bottom:8px"></div>'
-        '<div style="display:flex;gap:8px;justify-content:flex-end">'
-        '<button onclick="closeLogModal()" '
-        'style="padding:9px 16px;background:none;border:1px solid var(--border);color:var(--text2);'
-        'border-radius:6px;font-size:13px;cursor:pointer;font-family:inherit">Cancel</button>'
-        '<button id="cd-modal-send" onclick="submitLog()" '
-        'style="padding:9px 20px;background:#059669;border:none;color:#fff;border-radius:6px;'
-        'font-size:13px;font-weight:700;cursor:pointer;font-family:inherit">Save</button>'
-        '</div>'
-        '</div>'
-        '</div>'
+        # Log-activity modal — shared snippet from hub.shells
+        + LOG_ACTIVITY_MODAL_HTML
     )
     js = f"""
 const COMPANY_ID = {int(company_id)};
@@ -673,240 +580,14 @@ function openPhotoLightbox(url) {{
   document.body.appendChild(bg);
 }}
 
-// ── Voice notes (MediaRecorder + Whisper) ────────────────────────────────
-let _cdVoiceRecorder = null;
-let _cdVoiceChunks = [];
-let _cdVoiceBlob = null;
-let _cdVoiceUrl = '';        // Bunny URL after transcription
-let _cdVoiceTranscript = ''; // raw Whisper transcript
-let _cdVoiceTimer = null;
-let _cdVoiceStartedAt = 0;
-const _CD_VOICE_MAX_MS = 90000;  // 90s cap
-
-async function toggleVoiceNote() {{
-  var btn = document.getElementById('cd-voice-btn');
-  var st  = document.getElementById('cd-voice-st');
-  if (_cdVoiceRecorder && _cdVoiceRecorder.state === 'recording') {{
-    _cdVoiceRecorder.stop();
-    return;
-  }}
-  // Start a new recording
-  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {{
-    alert('Mic recording is not supported on this device/browser.');
-    return;
-  }}
-  try {{
-    var stream = await navigator.mediaDevices.getUserMedia({{ audio: true }});
-    var mime = MediaRecorder.isTypeSupported('audio/webm;codecs=opus') ? 'audio/webm;codecs=opus'
-              : MediaRecorder.isTypeSupported('audio/webm') ? 'audio/webm'
-              : MediaRecorder.isTypeSupported('audio/mp4') ? 'audio/mp4' : '';
-    _cdVoiceRecorder = new MediaRecorder(stream, mime ? {{ mimeType: mime }} : undefined);
-    _cdVoiceChunks = [];
-    _cdVoiceRecorder.ondataavailable = function(e) {{
-      if (e.data && e.data.size > 0) _cdVoiceChunks.push(e.data);
-    }};
-    _cdVoiceRecorder.onstop = async function() {{
-      stream.getTracks().forEach(function(t) {{ t.stop(); }});
-      if (_cdVoiceTimer) {{ clearInterval(_cdVoiceTimer); _cdVoiceTimer = null; }}
-      _cdVoiceBlob = new Blob(_cdVoiceChunks, {{ type: mime || 'audio/webm' }});
-      btn.textContent = '🎤 Record again';
-      btn.style.background = 'var(--bg)';
-      btn.style.color = 'var(--text2)';
-      st.textContent = 'Transcribing…';
-      // Upload + transcribe
-      var fd = new FormData();
-      var ext = (mime && mime.indexOf('mp4') !== -1) ? 'mp4' : 'webm';
-      fd.append('audio', _cdVoiceBlob, 'recording.' + ext);
-      try {{
-        var r = await fetch('/api/activities/transcribe', {{ method: 'POST', body: fd }});
-        if (!r.ok) {{
-          st.textContent = 'Transcription failed (HTTP ' + r.status + ')';
-          st.style.color = '#ef4444';
-          return;
-        }}
-        var d = await r.json();
-        _cdVoiceUrl = d.audio_url || '';
-        _cdVoiceTranscript = d.transcript || '';
-        if (_cdVoiceUrl) {{
-          var audioEl = document.getElementById('cd-voice-audio');
-          audioEl.src = _cdVoiceUrl;
-          document.getElementById('cd-voice-preview').style.display = 'block';
-        }}
-        if (_cdVoiceTranscript) {{
-          // Fill Notes textarea (rep can edit before submit). Append if there's
-          // already text, replace if it's empty.
-          var ta = document.getElementById('cd-summary');
-          if (ta.value.trim()) {{
-            ta.value = ta.value.trimEnd() + '\\n\\n' + _cdVoiceTranscript;
-          }} else {{
-            ta.value = _cdVoiceTranscript;
-          }}
-          st.style.color = '#059669';
-          st.textContent = '✓ Transcribed';
-        }} else if (d.error) {{
-          st.style.color = '#ef4444';
-          st.textContent = d.error;
-        }} else {{
-          st.style.color = '#f59e0b';
-          st.textContent = 'No transcript returned';
-        }}
-      }} catch (e) {{
-        st.style.color = '#ef4444';
-        st.textContent = 'Network error';
-      }}
-    }};
-    _cdVoiceRecorder.start();
-    _cdVoiceStartedAt = Date.now();
-    btn.textContent = '⏹ Stop';
-    btn.style.background = '#ef4444';
-    btn.style.color = '#fff';
-    st.style.color = 'var(--text3)';
-    st.textContent = '0:00';
-    _cdVoiceTimer = setInterval(function() {{
-      var s = Math.floor((Date.now() - _cdVoiceStartedAt) / 1000);
-      st.textContent = Math.floor(s/60) + ':' + String(s%60).padStart(2,'0');
-      if (Date.now() - _cdVoiceStartedAt >= _CD_VOICE_MAX_MS && _cdVoiceRecorder.state === 'recording') {{
-        _cdVoiceRecorder.stop();
-      }}
-    }}, 250);
-  }} catch (e) {{
-    alert('Could not access mic: ' + (e.message || e));
-  }}
-}}
-
-function clearVoiceNote() {{
-  _cdVoiceBlob = null; _cdVoiceUrl = ''; _cdVoiceTranscript = '';
-  document.getElementById('cd-voice-preview').style.display = 'none';
-  document.getElementById('cd-voice-audio').src = '';
-  document.getElementById('cd-voice-btn').textContent = '🎤 Record';
-  document.getElementById('cd-voice-st').textContent = '';
-}}
-
-// ── Log-activity modal ───────────────────────────────────────────────────
-let _cdSentiment = '';
-let _cdPhotoFile = null;
-const _SENT_COLORS = {{ Green: '#059669', Yellow: '#f59e0b', Red: '#ef4444' }};
-
-function setSentiment(val) {{
-  _cdSentiment = (_cdSentiment === val) ? '' : val;  // tap-again deselects
-  document.querySelectorAll('#cd-sentiment-row button').forEach(function(b) {{
-    var v = b.getAttribute('data-sent');
-    var on = (v === _cdSentiment);
-    b.style.background = on ? _SENT_COLORS[v] : 'var(--bg)';
-    b.style.color      = on ? '#fff'             : 'var(--text)';
-    b.style.borderColor = on ? _SENT_COLORS[v]   : 'var(--border)';
-  }});
-}}
-
-function onPhotoPicked(e) {{
-  var f = e.target.files && e.target.files[0];
-  if (!f) return;
-  _cdPhotoFile = f;
-  var reader = new FileReader();
-  reader.onload = function(ev) {{
-    document.getElementById('cd-photo-img').src = ev.target.result;
-    document.getElementById('cd-photo-preview').style.display = 'block';
-    document.getElementById('cd-photo-pick').textContent = '📷 Replace photo';
-  }};
-  reader.readAsDataURL(f);
-}}
-
-function clearPhoto() {{
-  _cdPhotoFile = null;
-  document.getElementById('cd-photo-input').value = '';
-  document.getElementById('cd-photo-preview').style.display = 'none';
-  document.getElementById('cd-photo-pick').textContent = '📷 Add photo';
-}}
-
-function openLogModal() {{
-  document.getElementById('cd-summary').value = '';
-  document.getElementById('cd-fu').value = '';
-  document.getElementById('cd-type').value = 'Call';
-  document.getElementById('cd-status').value = '';
-  document.getElementById('cd-modal-msg').textContent = '';
-  _cdSentiment = '';
-  setSentiment('');  // resets button styles
-  clearPhoto();
-  clearVoiceNote();
-  document.getElementById('cd-modal-bg').style.display = 'flex';
-}}
-
-function closeLogModal() {{
-  document.getElementById('cd-modal-bg').style.display = 'none';
-}}
-
-async function submitLog() {{
-  var summary = document.getElementById('cd-summary').value.trim();
-  var type    = document.getElementById('cd-type').value;
-  var fu      = document.getElementById('cd-fu').value;
-  var status  = document.getElementById('cd-status').value;
-  var msg     = document.getElementById('cd-modal-msg');
-  var btn     = document.getElementById('cd-modal-send');
-  if (!summary) {{
-    msg.style.color = '#ef4444';
-    msg.textContent = 'Notes are required.';
-    return;
-  }}
-  btn.disabled = true;
-  btn.textContent = 'Saving…';
-  msg.textContent = '';
-  // Upload photo first (if any), grab URL, include in activity payload.
-  var photoUrl = '';
-  if (_cdPhotoFile) {{
-    btn.textContent = 'Uploading photo…';
-    var fd = new FormData();
-    fd.append('photo', _cdPhotoFile);
-    try {{
-      var pr = await fetch('/api/companies/' + COMPANY_ID + '/activities/photo', {{
-        method: 'POST', body: fd,
-      }});
-      if (pr.ok) {{
-        var pj = await pr.json();
-        photoUrl = pj.url || '';
-      }} else {{
-        msg.style.color = '#ef4444';
-        msg.textContent = 'Photo upload failed (HTTP ' + pr.status + ')';
-        btn.disabled = false; btn.textContent = 'Save';
-        return;
-      }}
-    }} catch (e) {{
-      msg.style.color = '#ef4444';
-      msg.textContent = 'Photo upload network error';
-      btn.disabled = false; btn.textContent = 'Save';
-      return;
-    }}
-    btn.textContent = 'Saving…';
-  }}
-  var body = {{ summary: summary, type: type, kind: 'user_activity' }};
-  if (fu) body.follow_up = fu;
-  if (status) body.new_status = status;
-  if (_cdSentiment) body.sentiment = _cdSentiment;
-  if (photoUrl) body.photo_url = photoUrl;
-  if (_cdVoiceUrl) body.audio_url = _cdVoiceUrl;
-  if (_cdVoiceTranscript) body.transcript = _cdVoiceTranscript;
-  var r = await fetch('/api/companies/' + COMPANY_ID + '/activities', {{
-    method: 'POST', headers: {{ 'Content-Type': 'application/json' }},
-    body: JSON.stringify(body),
-  }});
-  if (r.ok) {{
-    closeLogModal();
-    await load();
-  }} else {{
-    var err = '';
-    try {{ err = (await r.json()).error || ''; }} catch(e) {{}}
-    msg.style.color = '#ef4444';
-    msg.textContent = 'Save failed: ' + (err || ('HTTP ' + r.status));
-    btn.disabled = false;
-    btn.textContent = 'Save';
-  }}
-}}
-
 load();
 """
     script_js = (
         f"const GFR_USER = {repr(user_name)};\n"
         f"const TOOL = {{venuesT: {int(T_COMPANIES)}}};\n"
         + js
+        + LOG_ACTIVITY_MODAL_JS
+        + "\nwindow._afterLogActivitySave = load;\n"
     )
     return _mobile_page(
         'm_directory', 'Company', body, script_js, br, bt, user=user,
@@ -1106,6 +787,13 @@ async function loadDir() {{
   document.getElementById('dir-kpi-active').textContent = active;
   document.getElementById('dir-kpi-new').textContent = needsContact;
 }}
+
+// Refetch when the page becomes visible again so a Contact Status update
+// made via Log Activity (which invalidates T_COMPANIES cache) shows up
+// immediately on tab-back instead of waiting for next full reload.
+document.addEventListener('visibilitychange', function() {{
+  if (document.visibilityState === 'visible') loadDir();
+}});
 
 loadDir();
 """
