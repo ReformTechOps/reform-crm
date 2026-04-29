@@ -1084,6 +1084,7 @@ async def capture_lead(
         except Exception:
             referred_company_row = None
 
+    from datetime import timezone as _tz_lead
     fields: dict = {
         "Name": name,
         "Phone": phone,
@@ -1091,6 +1092,7 @@ async def capture_lead(
         "Source": source,
         "Reason": service,
         "Owner": (user.get("email", "") or "").strip(),
+        "Created": _dt.now(_tz_lead.utc).isoformat(),
     }
     if email:
         fields["Email"] = email
