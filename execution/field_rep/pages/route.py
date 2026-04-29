@@ -913,13 +913,16 @@ async function loadRouteVenueData(stop) {{
     var lf = a['Business'];
     return Array.isArray(lf) && lf.some(function(r){{return r.id===venueId;}});
   }});
-  // Sort newest-first. Prefer the full Created ISO timestamp so multiple
-  // activities logged on the same day order by time-of-day; fall back to
-  // Date (YYYY-MM-DD) when Created is missing on legacy rows.
+  // Sort newest-first. Prefer the full Created ISO timestamp; fall back to
+  // Date (YYYY-MM-DD) when Created is missing (T_GOR_ACTS rows don't populate
+  // Created). Final tiebreak is row id — Baserow auto-increments, so a higher
+  // id means a newer row when same-day activities tie on date.
   var allActs = venueActs.concat(compActs).sort(function(a,b) {{
     var ka = a['Created'] || a['Date'] || '';
     var kb = b['Created'] || b['Date'] || '';
-    return kb.localeCompare(ka);
+    var c = kb.localeCompare(ka);
+    if (c !== 0) return c;
+    return (b.id || 0) - (a.id || 0);
   }});
 
   // ── Briefing card ───────────────────────────────────────────────────────
