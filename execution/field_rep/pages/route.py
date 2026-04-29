@@ -265,16 +265,27 @@ function updateProgress() {{
   }}
   // Next Stop pill \u2014 show the next destination (first Pending stop). When
   // a stop is In Progress, the rep is *at* it; "next" means where to go after.
-  // Pill hides when no Pending stops remain (route effectively done).
+  // When no Pending stops remain but the route is active (something has been
+  // completed or is in-progress), the pill switches to "Back to Office" and
+  // tapping it launches Google Maps turn-by-turn directions to the office.
   var pill = document.getElementById('next-stop-pill');
   if (pill) {{
     var next = stops.find(function(s) {{
       return s.status === 'Pending';
     }});
+    var routeActive = stops.some(function(s) {{
+      return s.status === 'In Progress'
+        || s.status === 'Visited'
+        || s.status === 'Skipped'
+        || s.status === 'Not Reached';
+    }});
     if (next) {{
       var label = next.name || 'Stop ' + (next.order || '');
       if (label.length > 28) label = label.slice(0, 27) + '\u2026';
       pill.textContent = 'Next \u25b6 ' + label;
+      pill.style.display = 'inline-block';
+    }} else if (routeActive) {{
+      pill.textContent = '\U0001f3e0 Back to Reform Chiropractic';
       pill.style.display = 'inline-block';
     }} else {{
       pill.style.display = 'none';
@@ -284,10 +295,27 @@ function updateProgress() {{
 
 function openNextStop() {{
   if (!_routeData || !_routeData.stops) return;
-  var next = _routeData.stops.find(function(s) {{
-    return s.status === 'Pending' || s.status === 'In Progress';
+  var stops = _routeData.stops;
+  var next = stops.find(function(s) {{ return s.status === 'Pending'; }});
+  if (next) {{ openRouteSheet(next); return; }}
+  // No Pending left — if the route is active (something completed / in
+  // progress), assume the rep is heading back. Launch Google Maps.
+  var routeActive = stops.some(function(s) {{
+    return s.status === 'In Progress'
+      || s.status === 'Visited'
+      || s.status === 'Skipped'
+      || s.status === 'Not Reached';
   }});
-  if (next) openRouteSheet(next);
+  if (routeActive) openDirectionsToOffice();
+}}
+
+// Hand off to Google Maps for native turn-by-turn nav back to the office.
+// Origin is left blank so Maps uses the device's current location.
+function openDirectionsToOffice() {{
+  var url = 'https://www.google.com/maps/dir/?api=1'
+    + '&destination=' + _GOFF_LAT + ',' + _GOFF_LNG
+    + '&travelmode=driving';
+  window.open(url, '_blank');
 }}
 
 // Modal listing skipped / not-reached stops with their reason notes.
@@ -726,7 +754,7 @@ function renderRouteSheet(stop) {{
   // so it's the first thing visible when reviewing a completed stop.
   if (status === 'Visited' || status === 'Skipped' || status === 'Not Reached') {{
     var nxt = (_routeData && _routeData.stops || []).find(function(s) {{
-      return s.stop_id !== id && (s.status === 'Pending' || s.status === 'In Progress');
+      return s.stop_id !== id && s.status === 'Pending';
     }});
     if (nxt) {{
       var nxtName = nxt.name || ('Stop ' + (nxt.order || ''));
@@ -735,7 +763,10 @@ function renderRouteSheet(stop) {{
            + 'style="width:100%;background:#ea580c;color:#fff;border:none;border-radius:10px;padding:14px;font-size:15px;font-weight:700;cursor:pointer;font-family:inherit">'
            + 'Next \u25b6 ' + esc(nxtName) + '</button></div>';
     }} else {{
-      html += '<div style="padding:8px 0 12px;text-align:center;font-size:13px;color:#059669;font-weight:600">\u2713 Route complete</div>';
+      // No more Pending stops \u2014 offer turn-by-turn directions back to office.
+      html += '<div style="padding:4px 0 12px"><button onclick="openDirectionsToOffice()" '
+           + 'style="width:100%;background:#1e3a5f;color:#fff;border:none;border-radius:10px;padding:14px;font-size:15px;font-weight:700;cursor:pointer;font-family:inherit">'
+           + '\U0001f3e0 Back to Reform Chiropractic</button></div>';
     }}
   }}
   // Action buttons by status. Pending \u2192 Arrive (one tap \u2192 In Progress, sets
