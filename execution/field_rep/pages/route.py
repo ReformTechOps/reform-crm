@@ -314,10 +314,14 @@ function openNextStop() {{
 }}
 
 // Hand off to Google Maps for native turn-by-turn nav back to the office.
-// Origin is left blank so Maps uses the device's current location.
+// Origin is left blank so Maps uses the device's current location. We pass
+// the actual postal address as the destination (rather than bare lat/lng)
+// because Maps reverse-geocodes coords to the nearest business and was
+// landing on the dental office next door instead of Reform.
 function openDirectionsToOffice() {{
+  var dest = '10345 Lakewood Blvd, Downey, CA 90241';
   var url = 'https://www.google.com/maps/dir/?api=1'
-    + '&destination=' + _GOFF_LAT + ',' + _GOFF_LNG
+    + '&destination=' + encodeURIComponent(dest)
     + '&travelmode=driving';
   window.open(url, '_blank');
 }}
