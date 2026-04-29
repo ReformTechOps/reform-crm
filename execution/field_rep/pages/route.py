@@ -913,10 +913,13 @@ async function loadRouteVenueData(stop) {{
     var lf = a['Business'];
     return Array.isArray(lf) && lf.some(function(r){{return r.id===venueId;}});
   }});
+  // Sort newest-first. Prefer the full Created ISO timestamp so multiple
+  // activities logged on the same day order by time-of-day; fall back to
+  // Date (YYYY-MM-DD) when Created is missing on legacy rows.
   var allActs = venueActs.concat(compActs).sort(function(a,b) {{
-    var da = a['Date'] || (a['Created']||'').slice(0,10);
-    var db = b['Date'] || (b['Created']||'').slice(0,10);
-    return (db||'').localeCompare(da||'');
+    var ka = a['Created'] || a['Date'] || '';
+    var kb = b['Created'] || b['Date'] || '';
+    return kb.localeCompare(ka);
   }});
 
   // ── Briefing card ───────────────────────────────────────────────────────
