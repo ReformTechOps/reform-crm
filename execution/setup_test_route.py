@@ -1,8 +1,7 @@
 #!/usr/bin/env python3
 """
 Ensure route-stop schema has check-in fields, then create a test route
-assigned to daniel.cis@reformchiropractic.com with 3 real venues so the
-mobile field-rep app has something to render.
+with N nearest venues so the mobile field-rep app has something to render.
 
 Phase 1 — ensure schema:
   T_GOR_ROUTE_STOPS (802) gains if missing:
@@ -13,13 +12,8 @@ Phase 1 — ensure schema:
   The `update_route_stop` handler in hub/guerilla_api.py writes these but
   the original setup never added them.
 
-Phase 2 — seed a test route:
-  - Name: "Test Route — Field Rep Demo"
-  - Date: today
-  - Assigned To: daniel.cis@reformchiropractic.com
-  - Status: Active
-  - Stops: first 3 venues from T_GOR_VENUES with Latitude + Longitude
-    populated, ordered by distance from the Downey office.
+Phase 2 — seed a test route with N nearest geocoded venues, ordered by
+distance from the Downey office.
 
 Idempotent — safe to re-run. An existing route with the same Name is
 patched; its stops are wiped + recreated so edits to the seed data take
@@ -27,7 +21,10 @@ effect on a re-run.
 
 Usage:
     python execution/setup_test_route.py
+    python execution/setup_test_route.py --name "Test Route 2 — 5 Stops" --stops 5
+    python execution/setup_test_route.py --assigned-to other@reformchiropractic.com
 """
+import argparse
 import math
 import os
 import time
@@ -49,8 +46,9 @@ T_GOR_ROUTE_STOPS = 802
 OFFICE_LAT = 33.9478
 OFFICE_LNG = -118.1335
 
-ROUTE_NAME    = "Test Route — Field Rep Demo"
-ASSIGNED_TO   = "daniel.cis@reformchiropractic.com"
+DEFAULT_ROUTE_NAME  = "Test Route — Field Rep Demo"
+DEFAULT_ASSIGNED_TO = "daniel.cis@reformchiropractic.com"
+DEFAULT_STOP_COUNT  = 3
 
 
 # ─── JWT helpers (for schema mutation — requires email/password auth) ────────
@@ -141,8 +139,8 @@ def fetch_all(tid: int) -> list:
     return out
 
 
-def pick_3_nearest_venues() -> list[dict]:
-    print("\n[2/3] Picking 3 nearest venues from T_GOR_VENUES with lat/lng")
+def pick_n_nearest_venues(n: int) -> list[dict]:
+    print(f"\n[2/3] Picking {n} nearest venues from T_GOR_VENUES with lat/lng")
     venues = fetch_all(T_GOR_VENUES)
     scored: list[tuple[float, dict]] = []
     for v in venues:
@@ -156,36 +154,36 @@ def pick_3_nearest_venues() -> list[dict]:
         d = haversine_miles(OFFICE_LAT, OFFICE_LNG, lat, lng)
         scored.append((d, v))
     scored.sort(key=lambda t: t[0])
-    picks = [v for _, v in scored[:3]]
-    for (d, v), order in zip(scored[:3], range(1, 4)):
+    picks = [v for _, v in scored[:n]]
+    for (d, v), order in zip(scored[:n], range(1, n + 1)):
         print(f"  #{order}  {v.get('Name') or '(unnamed)'}  —  {d:.2f}mi  (venue id: {v['id']})")
-    if len(picks) < 3:
-        raise SystemExit(f"Only found {len(picks)} geocoded venues; need at least 3.")
+    if len(picks) < n:
+        raise SystemExit(f"Only found {len(picks)} geocoded venues; need at least {n}.")
     return picks
 
 
 # ─── Phase 3 — write test route ──────────────────────────────────────────────
 
-def find_test_route() -> dict | None:
+def find_test_route(name: str) -> dict | None:
     rows = fetch_all(T_GOR_ROUTES)
     for r in rows:
-        if (r.get("Name") or "").strip() == ROUTE_NAME:
+        if (r.get("Name") or "").strip() == name:
             return r
     return None
 
 
-def upsert_test_route(venues: list[dict]) -> dict:
+def upsert_test_route(venues: list[dict], name: str, assigned_to: str) -> dict:
     print("\n[3/3] Upserting test route")
     from datetime import date as _date
     today = _date.today().isoformat()
     payload = {
-        "Name":        ROUTE_NAME,
+        "Name":        name,
         "Date":        today,
-        "Assigned To": ASSIGNED_TO,
+        "Assigned To": assigned_to,
         "Status":      "Active",
         "Notes":       "Seeded by setup_test_route.py for mobile field-rep testing.",
     }
-    existing = find_test_route()
+    existing = find_test_route(name)
     if existing:
         rid = existing["id"]
         print(f"  = Route exists (id={rid}); patching")
@@ -234,17 +232,26 @@ def upsert_test_route(venues: list[dict]) -> dict:
 
 
 def main():
+    parser = argparse.ArgumentParser(description=__doc__.split("\n")[1])
+    parser.add_argument("--name", default=DEFAULT_ROUTE_NAME,
+                        help=f"Route name (default: {DEFAULT_ROUTE_NAME!r})")
+    parser.add_argument("--stops", type=int, default=DEFAULT_STOP_COUNT,
+                        help=f"Number of nearest venues to add as stops (default: {DEFAULT_STOP_COUNT})")
+    parser.add_argument("--assigned-to", default=DEFAULT_ASSIGNED_TO,
+                        help=f"Email to assign the route to (default: {DEFAULT_ASSIGNED_TO})")
+    args = parser.parse_args()
+
     if not (BASEROW_URL and BASEROW_EMAIL and BASEROW_PASSWORD and BT):
         raise SystemExit("Missing BASEROW_URL / BASEROW_EMAIL / BASEROW_PASSWORD / BASEROW_API_TOKEN in .env")
     print(f"Baserow: {BASEROW_URL}")
-    print(f"Route:   {ROUTE_NAME}  →  {ASSIGNED_TO}")
+    print(f"Route:   {args.name}  →  {args.assigned_to}  ({args.stops} stops)")
 
     ensure_stop_fields()
-    venues = pick_3_nearest_venues()
-    route = upsert_test_route(venues)
+    venues = pick_n_nearest_venues(args.stops)
+    route = upsert_test_route(venues, name=args.name, assigned_to=args.assigned_to)
 
-    print(f"\nDone. Route id={route['id']} created/updated with 3 stops.")
-    print("Sign into routes.reformchiropractic.app as daniel.cis@... and")
+    print(f"\nDone. Route id={route['id']} created/updated with {args.stops} stops.")
+    print(f"Sign into routes.reformchiropractic.app as {args.assigned_to} and")
     print("the test route should appear on the Routes dashboard. Tap")
     print("'Today's Route' to see the map.")
 
