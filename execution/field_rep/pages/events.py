@@ -8,29 +8,43 @@ after the dual-write split.
 
 from hub.shared import (
     _mobile_page, _is_admin,
-    T_GOR_VENUES, T_EVENTS,
+    T_GOR_VENUES, T_EVENTS, T_LEADS, T_STAFF,
+    LEAD_MODAL_HTML, LEAD_MODAL_JS,
 )
 from hub.guerilla import GFR_EXTRA_HTML, GFR_EXTRA_JS
 
 
-def _mobile_events_page(br: str, bt: str, user: dict = None) -> str:
+def _mobile_events_page(br: str, bt: str, user: dict = None, archive: bool = False) -> str:
     user = user or {}
     user_name = user.get('name', '')
     user_email = (user.get('email', '') or '').strip().lower()
     is_admin = _is_admin(user)
 
+    title = 'Archived Events' if archive else 'Events'
+    subtitle = 'Past &amp; closed events' if archive else 'Upcoming &amp; recent events'
+    toggle_link = (
+        '<a href="/events" style="color:#3b82f6;font-size:12px;text-decoration:none">&larr; Back to active</a>'
+        if archive else
+        '<a href="/events/archive" style="color:#3b82f6;font-size:12px;text-decoration:none">View archive &rarr;</a>'
+    )
+    cta_html = (
+        ''
+        if archive else
+        '<button onclick="openGFRChooser()" '
+        'style="width:100%;background:#004ac6;color:#fff;border:none;border-radius:8px;'
+        'padding:12px;font-size:15px;font-weight:700;cursor:pointer;min-height:44px;margin-bottom:10px">'
+        '+ Schedule Event</button>'
+    )
+
     body = (
         '<div class="mobile-hdr">'
-        '<div><div class="mobile-hdr-title">Events</div>'
-        '<div class="mobile-hdr-sub">Upcoming &amp; recent events</div></div>'
+        f'<div><div class="mobile-hdr-title">{title}</div>'
+        f'<div class="mobile-hdr-sub">{subtitle}</div></div>'
         '<button class="m-hamburger" onclick="openMDrawer()" aria-label="Menu">☰</button>'
         '</div>'
         '<div class="mobile-body">'
-        # Schedule Event CTA — opens the same GFR chooser the route stop uses
-        '<button onclick="openGFRChooser()" '
-        'style="width:100%;background:#ea580c;color:#fff;border:none;border-radius:8px;'
-        'padding:12px;font-size:15px;font-weight:700;cursor:pointer;min-height:44px;margin-bottom:10px">'
-        '+ Schedule Event</button>'
+        f'<div style="margin-bottom:8px">{toggle_link}</div>'
+        + cta_html +
         # Status chip strip
         '<div id="evt-status-chips" style="display:flex;gap:6px;overflow-x:auto;padding-bottom:6px;'
         'margin-bottom:10px;-webkit-overflow-scrolling:touch"></div>'
@@ -54,14 +68,39 @@ def _mobile_events_page(br: str, bt: str, user: dict = None) -> str:
         '<div id="evt-modal-status" style="text-align:center;margin-top:10px;font-size:13px;min-height:20px"></div>'
         '</div>'
         '</div>'
+        + LEAD_MODAL_HTML
     )
 
     js = f"""
 const USER_EMAIL = {repr(user_email)};
 const IS_ADMIN = {'true' if is_admin else 'false'};
+const IS_ARCHIVE = {'true' if archive else 'false'};
 const GFR_USER = {repr(user_name)};
-const TOOL = {{ venuesT: {T_GOR_VENUES} }};
+const TOOL = {{ venuesT: {T_GOR_VENUES}, leadsT: {T_LEADS}, staffT: {T_STAFF} }};
+const _EQUIPMENT_FIELDS = [
+  ['Massage Chair Needed', 'Massage chair'],
+  ['Massage Table Needed', 'Massage table'],
+  ['Table Needed',         'Folding table'],
+  ['EZ Up Needed',         'EZ Up tent'],
+  ['Banner Needed',        'Banner'],
+  ['Flyers Needed',        'Flyers'],
+  ['Intake Forms Needed',  'Intake forms'],
+  ['Tablet Needed',        'Tablet'],
+  ['Power Strip Needed',   'Power strip'],
+  ['Generator Needed',     'Generator'],
+];
+var _STAFF_CACHE = null;
 const _EVT_STATUSES = ['Prospective','Maybe','Approved','Declined','Scheduled','Completed'];
+const _ACTIVE_STATUSES = ['Prospective','Maybe','Approved','Scheduled'];
+
+function _isActiveEvent(e) {{
+  var d = e['Event Date'] || '';
+  var st = (e['Event Status'] && e['Event Status'].value) || e['Event Status'] || '';
+  var today = new Date().toISOString().slice(0, 10);
+  var futureOrToday = !d || d >= today;
+  var activeStatus = !st || _ACTIVE_STATUSES.indexOf(st) >= 0;
+  return futureOrToday && activeStatus;
+}}
 const _EVT_COLORS = {{
   'Prospective':'#3b82f6','Maybe':'#f59e0b','Approved':'#10b981',
   'Declined':'#ef4444','Scheduled':'#8b5cf6','Completed':'#64748b'
@@ -90,7 +129,7 @@ function renderStatusChips() {{
   var labels = ['All'].concat(_EVT_STATUSES);
   box.innerHTML = labels.map(function(s) {{
     var active = (s === _filterStatus);
-    var color = (s === 'All') ? '#ea580c' : (_EVT_COLORS[s] || '#6b7280');
+    var color = (s === 'All') ? '#004ac6' : (_EVT_COLORS[s] || '#6b7280');
     var bg = active ? color : 'var(--bg)';
     var fg = active ? '#fff' : 'var(--text2)';
     return '<button onclick="setStatusFilter(\\''+ esc(s) +'\\')" '
@@ -117,7 +156,7 @@ function renderEvents() {{
   if (!_events.length) {{
     box.innerHTML = '<div style="color:var(--text3);padding:30px 10px;text-align:center">'
                   + '<div style="font-size:14px;margin-bottom:10px">No events yet.</div>'
-                  + '<button onclick="openGFRChooser()" style="background:#ea580c;color:#fff;border:none;'
+                  + '<button onclick="openGFRChooser()" style="background:#004ac6;color:#fff;border:none;'
                   + 'border-radius:8px;padding:10px 18px;font-size:13px;font-weight:600;cursor:pointer">'
                   + '+ Schedule your first event</button></div>';
     return;
@@ -172,6 +211,9 @@ function openEventModal(id) {{
   var dec = ev['Decision Notes'] || '';
   var checkedIn = !!ev['Checked In'];
   var slug = ev['Form Slug'] || '';
+  var biz = Array.isArray(ev['Business'])
+    ? ev['Business'].map(function(b) {{ return b && (b.value || b.name); }}).filter(Boolean).join(', ')
+    : '';
 
   var html = '';
   function row(label, val) {{
@@ -182,11 +224,19 @@ function openEventModal(id) {{
   }}
   html += row('Type', et);
   html += row('Date', dt);
+  html += row('Business', biz);
   html += row('Organizer', org + (oph ? ' · ' + oph : ''));
   html += row('Venue Address', addr);
   if (ant) html += row('Anticipated Count', ant);
   html += row('Lead Count', String(leads));
   if (notes) html += row('Notes', notes);
+  var staffStr = (ev['Staff Attending'] || '').trim();
+  if (staffStr) html += row('Staff attending', staffStr);
+  // Equipment summary (read-only) — only show items that are checked
+  var eqOn = _EQUIPMENT_FIELDS.filter(function(p) {{ return !!ev[p[0]]; }}).map(function(p) {{ return p[1]; }});
+  if (eqOn.length) html += row('Equipment', eqOn.join(', '));
+  // Leads-from-this-event section (loaded async after open)
+  html += '<div id="evt-leads-section" style="margin-top:6px"></div>';
 
   if (IS_ADMIN) {{
     // Editable fields for admins
@@ -204,7 +254,7 @@ function openEventModal(id) {{
     // Checked In checkbox
     html += '<div style="margin-bottom:10px;display:flex;align-items:center;gap:8px">'
          + '<input type="checkbox" id="evt-edit-checkedin"'+(checkedIn?' checked':'')+' '
-         + 'style="width:18px;height:18px;accent-color:#ea580c">'
+         + 'style="width:18px;height:18px;accent-color:#004ac6">'
          + '<label for="evt-edit-checkedin" style="font-size:14px;color:var(--text);cursor:pointer">Checked In</label>'
          + '</div>';
     // Decision Notes
@@ -214,6 +264,30 @@ function openEventModal(id) {{
          + 'style="width:100%;background:var(--input-bg);border:1px solid var(--border);color:var(--text);'
          + 'border-radius:8px;padding:9px 12px;font-size:14px;box-sizing:border-box;font-family:inherit;resize:vertical">'
          + esc(dec) + '</textarea></div>';
+    // Equipment checklist (booleans)
+    html += '<div style="margin-bottom:10px">'
+         + '<label style="font-size:11px;font-weight:600;color:var(--text3);display:block;margin-bottom:6px">Equipment to bring</label>'
+         + '<div style="display:grid;grid-template-columns:1fr 1fr;gap:6px 12px">';
+    _EQUIPMENT_FIELDS.forEach(function(pair) {{
+      var fld = pair[0], lbl = pair[1];
+      var checked = !!ev[fld];
+      var dom = 'evt-eq-' + fld.replace(/\\W+/g, '-');
+      html += '<label style="display:flex;align-items:center;gap:6px;font-size:13px;color:var(--text);cursor:pointer">'
+           + '<input type="checkbox" data-evt-eq="'+esc(fld)+'" id="'+dom+'"'
+           + (checked ? ' checked' : '')
+           + ' style="width:16px;height:16px;accent-color:#004ac6">'
+           + esc(lbl) + '</label>';
+    }});
+    html += '</div></div>';
+    // Staff Attending — checkbox list of T_STAFF (loaded async; placeholder
+    // below). Stored as comma-joined emails on the event's Staff Attending
+    // field (long_text — see add_event_staff_attending.py for why it's not
+    // a link_row).
+    html += '<div style="margin-bottom:10px">'
+         + '<label style="font-size:11px;font-weight:600;color:var(--text3);display:block;margin-bottom:4px">Staff attending</label>'
+         + '<div id="evt-edit-staff" style="background:var(--input-bg);border:1px solid var(--border);'
+         + 'border-radius:8px;padding:8px 10px;font-size:13px;color:var(--text3);max-height:180px;overflow-y:auto">'
+         + 'Loading staff…</div></div>';
     // Save button
     html += '<button onclick="saveEvent()" '
          + 'style="width:100%;background:#059669;color:#fff;border:none;border-radius:8px;'
@@ -230,7 +304,91 @@ function openEventModal(id) {{
   document.getElementById('evt-modal-status').textContent = '';
   var bg = document.getElementById('evt-modal-bg');
   bg.style.display = 'flex';
+  loadEventLeads(id);
+  if (IS_ADMIN) loadStaffPicker(ev['Staff Attending'] || '');
 }}
+
+async function loadStaffPicker(currentVal) {{
+  var box = document.getElementById('evt-edit-staff');
+  if (!box) return;
+  var selected = new Set(
+    String(currentVal || '').split(',').map(function(s) {{ return s.trim().toLowerCase(); }}).filter(Boolean)
+  );
+  try {{
+    if (!_STAFF_CACHE) {{
+      _STAFF_CACHE = await fetchAll(TOOL.staffT);
+    }}
+    var staff = (_STAFF_CACHE || []).filter(function(s) {{
+      // Treat missing Active as active so we don't accidentally hide everyone.
+      return s.Active !== false && (s.Email || s.Name);
+    }});
+    staff.sort(function(a, b) {{ return (a.Name || a.Email || '').localeCompare(b.Name || b.Email || ''); }});
+    if (!staff.length) {{
+      box.innerHTML = '<div style="color:var(--text3);font-size:12px">No staff records found.</div>';
+      return;
+    }}
+    var html = '';
+    staff.forEach(function(s) {{
+      var em = (s.Email || '').trim();
+      if (!em) return;
+      var nm = s.Name || em;
+      var checked = selected.has(em.toLowerCase());
+      var dom = 'evt-st-' + em.replace(/\\W+/g, '-');
+      html += '<label style="display:flex;align-items:center;gap:6px;padding:3px 0;font-size:13px;color:var(--text);cursor:pointer">'
+           + '<input type="checkbox" data-evt-staff="'+esc(em)+'" id="'+dom+'"'
+           + (checked ? ' checked' : '')
+           + ' style="width:15px;height:15px;accent-color:#004ac6">'
+           + esc(nm) + '</label>';
+    }});
+    box.innerHTML = html || '<div style="color:var(--text3);font-size:12px">No staff with email addresses.</div>';
+  }} catch (e) {{
+    box.innerHTML = '<div style="color:#ef4444;font-size:12px">Failed to load staff.</div>';
+  }}
+}}
+
+async function loadEventLeads(eventId) {{
+  var box = document.getElementById('evt-leads-section');
+  if (!box) return;
+  box.innerHTML = '<div style="font-size:11px;color:var(--text3);padding:6px 0">Loading leads…</div>';
+  try {{
+    var rows = await fetchAll(TOOL.leadsT);
+    var matches = rows.filter(function(L) {{
+      var ev = L['Event'];
+      if (!Array.isArray(ev)) return false;
+      return ev.some(function(e) {{ return e && e.id === eventId; }});
+    }});
+    if (!matches.length) {{
+      box.innerHTML = '<div style="font-size:11px;color:var(--text3);padding:6px 0;border-top:1px solid var(--border);margin-top:6px">No leads from this event yet.</div>';
+      return;
+    }}
+    matches.sort(function(a, b) {{ return (b.Created||'').localeCompare(a.Created||''); }});
+    var out = '<div style="font-size:11px;font-weight:600;color:var(--text3);text-transform:uppercase;margin:10px 0 4px">Leads from this event</div>';
+    matches.forEach(function(L) {{
+      var st = (L.Status && L.Status.value) || L.Status || '';
+      var nm = L.Name || '(no name)';
+      var ph = L.Phone || '';
+      out += '<div onclick="openLeadModal(' + L.id + ')" '
+          + 'style="padding:6px 0;border-top:1px solid var(--border);cursor:pointer;display:flex;justify-content:space-between;gap:8px;align-items:center">'
+          + '<div style="flex:1;min-width:0">'
+          + '<div style="font-size:13px;font-weight:600;color:var(--text)">'+esc(nm)+'</div>'
+          + (ph ? '<div style="font-size:11px;color:var(--text3)">'+esc(ph)+'</div>' : '')
+          + '</div>'
+          + (st ? '<span style="font-size:10px;color:var(--text2);background:var(--bg);border:1px solid var(--border);border-radius:4px;padding:2px 6px;white-space:nowrap">'+esc(st)+'</span>' : '')
+          + '</div>';
+    }});
+    box.innerHTML = out;
+  }} catch (e) {{
+    box.innerHTML = '<div style="font-size:11px;color:#ef4444;padding:6px 0">Failed to load leads.</div>';
+  }}
+}}
+
+// When a lead is edited via the shared lead modal, refresh the events list
+// (Lead Count may have changed) and the leads-from-this-event section if the
+// event modal is still open behind it.
+window._afterLeadSave = function() {{
+  loadEvents();
+  if (_currentEventId) loadEventLeads(_currentEventId);
+}};
 
 function closeEventModal() {{
   document.getElementById('evt-modal-bg').style.display = 'none';
@@ -249,6 +407,16 @@ async function saveEvent() {{
     'Checked In': document.getElementById('evt-edit-checkedin').checked,
     'Decision Notes': document.getElementById('evt-edit-decision').value
   }};
+  // Equipment booleans
+  document.querySelectorAll('[data-evt-eq]').forEach(function(el) {{
+    payload[el.getAttribute('data-evt-eq')] = el.checked;
+  }});
+  // Staff Attending — collect ticked emails into a comma-joined string
+  var staffEmails = [];
+  document.querySelectorAll('[data-evt-staff]').forEach(function(el) {{
+    if (el.checked) staffEmails.push(el.getAttribute('data-evt-staff'));
+  }});
+  payload['Staff Attending'] = staffEmails.join(', ');
   try {{
     var r = await fetch('/api/events/' + _currentEventId, {{
       method: 'PATCH',
@@ -275,6 +443,12 @@ async function saveEvent() {{
 async function loadEvents() {{
   try {{
     var rows = await fetchAll({T_EVENTS});
+    // Active page shows only active+future events. Archive shows the rest
+    // (past-dated OR Completed/Declined). Same predicate as the lead-capture
+    // event picker so reps see one consistent definition of "active."
+    rows = rows.filter(function(e) {{
+      return IS_ARCHIVE ? !_isActiveEvent(e) : _isActiveEvent(e);
+    }});
     // Sort: future-dated first (ascending), then past (descending). Within
     // same-date, group by status (active before completed).
     var today = new Date().toISOString().slice(0, 10);
@@ -311,5 +485,6 @@ window._afterCompanyDataChange = loadEvents;
 renderStatusChips();
 loadEvents();
 """
-    return _mobile_page('m_events', 'Events', body, js, br, bt, user=user,
+    return _mobile_page('m_events', 'Events', body, js + LEAD_MODAL_JS,
+                         br, bt, user=user,
                          extra_html=GFR_EXTRA_HTML, extra_js=GFR_EXTRA_JS)

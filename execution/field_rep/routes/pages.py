@@ -17,6 +17,8 @@ from field_rep.pages import (
     _mobile_directory_page,
     _mobile_events_page,
     _mobile_home_page,
+    _mobile_kiosk_setup_page,
+    _kiosk_run_page,
     _mobile_lead_capture_page,
     _mobile_map_page,
     _mobile_outreach_due_page,
@@ -89,7 +91,36 @@ async def events_page(request: Request):
     user, br, bt = await _guard(request)
     if not user:
         return RedirectResponse(url="/login")
-    return HTMLResponse(_mobile_events_page(br, bt, user=user))
+    return HTMLResponse(_mobile_events_page(br, bt, user=user, archive=False))
+
+
+@router.get("/events/archive", response_class=HTMLResponse)
+async def events_archive_page(request: Request):
+    """Past-dated and Completed/Declined events. Same renderer as /events
+    with archive=True."""
+    user, br, bt = await _guard(request)
+    if not user:
+        return RedirectResponse(url="/login")
+    return HTMLResponse(_mobile_events_page(br, bt, user=user, archive=True))
+
+
+@router.get("/kiosk/setup", response_class=HTMLResponse)
+async def kiosk_setup_page(request: Request):
+    """Authenticated kiosk setup — pick event + consents, set PIN, start."""
+    user, br, bt = await _guard(request)
+    if not user:
+        return RedirectResponse(url="/login")
+    return HTMLResponse(_mobile_kiosk_setup_page(br, bt, user=user))
+
+
+@router.get("/kiosk/run/{kiosk_id}", response_class=HTMLResponse)
+async def kiosk_run_page(kiosk_id: str, request: Request):
+    """Public kiosk page — locked-down lead capture + consent flow.
+    No auth check; the kiosk_id IS the bearer. Page itself loads its session
+    via /api/kiosk/{kid} and renders an error state if the session is gone."""
+    br = os.environ.get("BASEROW_URL", "")
+    bt = os.environ.get("BASEROW_API_TOKEN", "")
+    return HTMLResponse(_kiosk_run_page(br, bt, kiosk_id))
 
 
 @router.get("/admin", response_class=HTMLResponse)

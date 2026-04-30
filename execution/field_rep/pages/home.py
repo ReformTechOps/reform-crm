@@ -157,7 +157,7 @@ async function loadHomeDashboard() {{
     else if (x.overdue >= -2) badge = '<span style="background:#f59e0b20;color:#f59e0b;border-radius:4px;padding:2px 7px;font-size:11px;font-weight:600">due in ' + (-x.overdue) + 'd</span>';
     else badge = '<span style="background:#05966920;color:#059669;border-radius:4px;padding:2px 7px;font-size:11px;font-weight:600">' + (-x.overdue) + 'd left</span>';
     const btn = (routeId && x.venueId)
-      ? '<button id="box-add-' + i + '" onclick="addBoxToTodayRoute(' + i + ')" style="background:#ea580c;color:#fff;border:none;border-radius:6px;padding:7px 11px;font-size:12px;font-weight:600;cursor:pointer;min-height:34px;white-space:nowrap">+ Add</button>'
+      ? '<button id="box-add-' + i + '" onclick="addBoxToTodayRoute(' + i + ')" style="background:#004ac6;color:#fff;border:none;border-radius:6px;padding:7px 11px;font-size:12px;font-weight:600;cursor:pointer;min-height:34px;white-space:nowrap">+ Add</button>'
       : '<span style="font-size:10px;color:var(--text4)">' + (routeId ? 'no venue' : 'no active route') + '</span>';
     const companyId = venueCoMap[x.venueId];
     const nameHtml = companyId
@@ -300,7 +300,7 @@ async function load() {{
 
   document.getElementById('m-stats').innerHTML =
     '<div style="background:var(--card);border:1px solid var(--border);border-radius:10px;padding:12px;text-align:center">'
-    + '<div style="font-size:22px;font-weight:800;color:#ea580c">' + routes.length + '</div>'
+    + '<div style="font-size:22px;font-weight:800;color:#004ac6">' + routes.length + '</div>'
     + '<div style="font-size:10px;color:var(--text3);text-transform:uppercase">Routes</div></div>'
     + '<div style="background:var(--card);border:1px solid var(--border);border-radius:10px;padding:12px;text-align:center">'
     + '<div style="font-size:22px;font-weight:800;color:#059669">' + visited + '<span style="font-size:12px;color:var(--text3)">/' + totalStops + '</span></div>'

@@ -43,11 +43,11 @@ def _mobile_route_page(br: str, bt: str, user: dict = None,
         'style="display:none;margin-top:4px;font-size:11px;font-weight:600;'
         'color:#f97316;cursor:pointer"></div>'
         '<div style="margin-top:6px;background:var(--border);border-radius:4px;height:5px;overflow:hidden">'
-        '<div id="rt-bar" style="height:100%;background:#ea580c;border-radius:4px;width:0%"></div>'
+        '<div id="rt-bar" style="height:100%;background:#004ac6;border-radius:4px;width:0%"></div>'
         '</div>'
         '<div id="rt-actions" style="margin-top:8px;display:none;gap:8px;flex-wrap:wrap">'
         '<a href="#" onclick="openFullDirections();return false" '
-        'style="display:inline-block;padding:7px 12px;background:#ea580c;color:#fff;'
+        'style="display:inline-block;padding:7px 12px;background:#004ac6;color:#fff;'
         'border-radius:8px;font-size:12px;font-weight:700;text-decoration:none">'
         '\U0001f9ed Open in Google Maps</a>'
         '<a href="#" onclick="openDirectionsSheet();return false" '
@@ -82,8 +82,8 @@ def _mobile_route_page(br: str, bt: str, user: dict = None,
         # Progress stop after the current one. Tap to open that stop's sheet.
         '<button id="next-stop-pill" onclick="openNextStop()" '
         'style="display:none;position:fixed;right:10px;bottom:calc(10px + env(safe-area-inset-bottom));z-index:95;'
-        'background:#ea580c;color:#fff;border:none;border-radius:22px;padding:10px 16px;'
-        'font-size:13px;font-weight:700;box-shadow:0 4px 12px rgba(234,88,12,.4);cursor:pointer;font-family:inherit;'
+        'background:#004ac6;color:#fff;border:none;border-radius:22px;padding:10px 16px;'
+        'font-size:13px;font-weight:700;box-shadow:0 4px 12px rgba(0,74,198,.4);cursor:pointer;font-family:inherit;'
         'max-width:60vw;text-align:left;line-height:1.2"></button>'
         # Lead detail / edit modal — shared snippet defined in hub.shells
         + LEAD_MODAL_HTML
@@ -112,6 +112,30 @@ function _cleanNote(s) {{
   var m = s.match(/What Happened:\\s*([\\s\\S]*?)(?:\\n[A-Z][\\w \\-]+:\\s|$)/);
   if (m && m[1]) return m[1].trim();
   return s.trim();
+}}
+
+// Parse "Label: value" lines from an Activity Summary blob into structured
+// pairs so the UI can render forms as a label/value grid instead of a wall
+// of text. Returns null for free-text notes (no Label: pairs found).
+function _parseSummary(s) {{
+  if (!s) return null;
+  var lines = s.split(/\\r?\\n/);
+  var pairs = [];
+  var meta = {{}};
+  lines.forEach(function(ln) {{
+    ln = ln.replace(/\\s+$/, '');
+    if (!ln) return;
+    var idx = ln.indexOf(': ');
+    if (idx < 0) return;
+    var label = ln.slice(0, idx).trim();
+    var value = ln.slice(idx + 2).trim();
+    if (!label || !value) return;
+    if (label === 'Form') meta.form = value;
+    else if (label === 'Submitted by') meta.by = value;
+    else pairs.push({{label: label, value: value}});
+  }});
+  if (!pairs.length && !meta.form && !meta.by) return null;
+  return {{meta: meta, pairs: pairs}};
 }}
 
 function _haversine(lat1, lng1, lat2, lng2) {{
@@ -506,7 +530,7 @@ function _drawDirectionsOrFallback(pathCoords) {{
   var straightLine = function() {{
     _rPolyline = new google.maps.Polyline({{
       path: pathCoords, geodesic: true,
-      strokeColor: '#ea580c', strokeOpacity: 0.7, strokeWeight: 3,
+      strokeColor: '#004ac6', strokeOpacity: 0.7, strokeWeight: 3,
       map: _rMap
     }});
   }};
@@ -523,7 +547,7 @@ function _drawDirectionsOrFallback(pathCoords) {{
     map: _rMap,
     suppressMarkers: true,    // we already draw numbered markers
     preserveViewport: true,   // fitBounds will run on our markers below
-    polylineOptions: {{strokeColor: '#ea580c', strokeOpacity: 0.8, strokeWeight: 4}},
+    polylineOptions: {{strokeColor: '#004ac6', strokeOpacity: 0.8, strokeWeight: 4}},
   }});
   ds.route({{
     origin: origin, destination: destination, waypoints: waypoints,
@@ -806,7 +830,7 @@ function renderRouteSheet(stop) {{
       var nxtName = nxt.name || ('Stop ' + (nxt.order || ''));
       if (nxtName.length > 32) nxtName = nxtName.slice(0, 31) + '\u2026';
       html += '<div style="padding:4px 0 12px"><button onclick="openRouteSheet(_routeData.stops.find(function(s){{return s.stop_id==='+nxt.stop_id+';}}))" '
-           + 'style="width:100%;background:#ea580c;color:#fff;border:none;border-radius:10px;padding:14px;font-size:15px;font-weight:700;cursor:pointer;font-family:inherit">'
+           + 'style="width:100%;background:#004ac6;color:#fff;border:none;border-radius:10px;padding:14px;font-size:15px;font-weight:700;cursor:pointer;font-family:inherit">'
            + 'Next \u25b6 ' + esc(nxtName) + '</button></div>';
     }} else {{
       // No more Pending stops \u2014 offer turn-by-turn directions back to office,
@@ -830,12 +854,12 @@ function renderRouteSheet(stop) {{
     html += '</div>';
   }} else if (status === 'In Progress') {{
     html += '<div style="padding:4px 0 12px;display:flex;gap:10px">';
-    html += '<button onclick="routeCheckIn('+id+')" style="flex:1;background:#ea580c;color:#fff;border:none;border-radius:10px;padding:14px;font-size:15px;font-weight:700;cursor:pointer">Check In</button>';
+    html += '<button onclick="routeCheckIn('+id+')" style="flex:1;background:#004ac6;color:#fff;border:none;border-radius:10px;padding:14px;font-size:15px;font-weight:700;cursor:pointer">Check In</button>';
     html += '<button onclick="routeSkip('+id+')" style="width:70px;background:var(--bg);color:var(--text2);border:1px solid var(--border);border-radius:10px;padding:14px;font-size:12px;font-weight:600;cursor:pointer">Skip</button>';
     html += '<button onclick="routeNotReached('+id+')" style="width:70px;background:var(--bg);color:#ef4444;border:1px solid #ef444440;border-radius:10px;padding:14px;font-size:11px;font-weight:600;cursor:pointer;line-height:1.2">Didn\\\'t<br>Get To</button>';
     html += '</div>';
   }} else {{
-    html += '<div style="padding:4px 0 12px"><button onclick="routeCheckInForm()" style="width:100%;background:#ea580c;color:#fff;border:none;border-radius:10px;padding:14px;font-size:15px;font-weight:700;cursor:pointer">Check In</button></div>';
+    html += '<div style="padding:4px 0 12px"><button onclick="routeCheckInForm()" style="width:100%;background:#004ac6;color:#fff;border:none;border-radius:10px;padding:14px;font-size:15px;font-weight:700;cursor:pointer">Check In</button></div>';
   }}
   html += '<div id="rv-info-'+id+'" style="color:var(--text3);font-size:13px">Loading venue details\u2026</div>';
   html += '</div>';
@@ -946,10 +970,26 @@ async function loadRouteVenueData(stop) {{
       }}
       brief += '<div style="font-size:13px;line-height:1.5;color:var(--text2)">';
       if (daysAgo) brief += '<div>'+dot+'<strong>Last visit</strong> · '+esc(daysAgo)+'</div>';
-      var noteText = _cleanNote(latest.Summary || '');
-      if (noteText) {{
-        var note = noteText.length > 80 ? noteText.slice(0, 80) + '…' : noteText;
-        brief += '<div style="margin-top:4px;font-style:italic;color:var(--text)">"'+esc(note)+'"</div>';
+      var noteText = latest.Summary || '';
+      var parsed = _parseSummary(noteText);
+      if (parsed) {{
+        if (parsed.meta.form || parsed.meta.by) {{
+          brief += '<div style="margin-top:6px;font-size:12px;color:var(--text3)">';
+          if (parsed.meta.form) brief += esc(parsed.meta.form);
+          if (parsed.meta.form && parsed.meta.by) brief += ' · ';
+          if (parsed.meta.by) brief += 'by ' + esc(parsed.meta.by);
+          brief += '</div>';
+        }}
+        if (parsed.pairs.length) {{
+          brief += '<div style="margin-top:6px;display:grid;grid-template-columns:auto 1fr;gap:3px 10px;font-size:12px;color:var(--text)">';
+          parsed.pairs.forEach(function(p) {{
+            brief += '<div style="color:var(--text3)">' + esc(p.label) + '</div>';
+            brief += '<div style="word-break:break-word">' + esc(p.value) + '</div>';
+          }});
+          brief += '</div>';
+        }}
+      }} else if (noteText) {{
+        brief += '<div style="margin-top:4px;color:var(--text);white-space:pre-wrap;word-break:break-word">' + esc(noteText) + '</div>';
       }}
       var person = latest['Contact Person'] || '';
       if (person) brief += '<div style="margin-top:4px">\U0001f464 '+esc(person)+'</div>';
@@ -1012,7 +1052,7 @@ async function loadRouteVenueData(stop) {{
         var t = (a['Type'] && a['Type'].value) || a['Type'] || '';
         var o = (a['Outcome'] && a['Outcome'].value) || a['Outcome'] || '';
         var d = a['Date'] || (a['Created']||'').slice(0,10);
-        var sm = _cleanNote(a['Summary'] || '');
+        var sm = a['Summary'] || '';
         var sentV = (a.Sentiment && a.Sentiment.value) || a.Sentiment || '';
         var photo = (a['Photo URL'] || '').trim();
         var audio = (a['Audio URL'] || '').trim();
@@ -1031,7 +1071,7 @@ async function loadRouteVenueData(stop) {{
           : '';
         return '<div style="padding:6px 0;border-bottom:1px solid var(--border);font-size:13px">'
              + head
-             + (sm ? '<div style="font-size:12px;color:var(--text2);margin-top:2px">'+esc(sm)+'</div>' : '')
+             + (sm ? '<div style="font-size:12px;color:var(--text2);margin-top:2px;white-space:pre-wrap;word-break:break-word">'+esc(sm)+'</div>' : '')
              + player
              + thumb
              + (d ? '<div style="font-size:11px;color:var(--text3);margin-top:2px">'+esc(d)+'</div>' : '')
@@ -1062,7 +1102,7 @@ async function loadRouteVenueData(stop) {{
       return (b['Created']||'').localeCompare(a['Created']||'');
     }});
     var lh = '<div style="margin-bottom:12px">';
-    lh += '<button onclick="openRouteLeadCapture()" style="width:100%;background:#ea580c;color:#fff;border:none;border-radius:8px;padding:12px;font-size:14px;font-weight:700;cursor:pointer;min-height:44px">+ Capture Lead</button>';
+    lh += '<button onclick="openRouteLeadCapture()" style="width:100%;background:#004ac6;color:#fff;border:none;border-radius:8px;padding:12px;font-size:14px;font-weight:700;cursor:pointer;min-height:44px">+ Capture Lead</button>';
     lh += '</div>';
     if (myLeads.length) {{
       var stColors = {{'New':'#3b82f6','Contacted':'#ea580c','Appointment Set':'#7c3aed','Patient Seen':'#0891b2','Converted':'#059669','Dropped':'#9ca3af'}};
@@ -1137,7 +1177,7 @@ async function loadRouteVenueData(stop) {{
             else if (age >= pickupDays) timerBadge = '<span style="background:#f59e0b20;color:#f59e0b;border-radius:4px;padding:2px 6px;font-size:10px;font-weight:600;margin-left:6px">'+age+'d - Follow up</span>';
             else timerBadge = '<span style="background:#05966920;color:#059669;border-radius:4px;padding:2px 6px;font-size:10px;font-weight:600;margin-left:6px">'+age+'d</span>';
             if (IS_ADMIN) {{
-              pickupBtn = '<button onclick="pickupBox('+b.id+')" style="margin-top:6px;background:#ea580c;color:#fff;border:none;border-radius:6px;padding:6px 14px;font-size:12px;font-weight:600;cursor:pointer;min-height:36px">Pick Up Box</button>';
+              pickupBtn = '<button onclick="pickupBox('+b.id+')" style="margin-top:6px;background:#004ac6;color:#fff;border:none;border-radius:6px;padding:6px 14px;font-size:12px;font-weight:600;cursor:pointer;min-height:36px">Pick Up Box</button>';
               daysEdit = '<div style="margin-top:6px;display:flex;align-items:center;gap:6px">'
                 + '<span style="font-size:11px;color:var(--text3)">Pickup in</span>'
                 + '<input type="number" value="'+pickupDays+'" min="1" max="90" id="rv-edit-days-'+b.id+'" style="width:50px;background:var(--bg);border:1px solid var(--border);color:var(--text1);border-radius:6px;padding:4px 6px;font-size:12px;text-align:center">'

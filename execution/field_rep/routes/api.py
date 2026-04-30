@@ -24,8 +24,10 @@ from hub.access import _is_admin
 from hub.constants import (
     T_EVENTS, T_GOR_ACTS, T_GOR_BOXES, T_GOR_ROUTES, T_GOR_ROUTE_STOPS,
     T_GOR_VENUES, T_LEADS,
+    T_CONSENT_FORMS, T_CONSENT_SUBMISSIONS,
 )
 
+from .. import kiosk as kiosk_mod
 from .. import storage
 from ..auth import get_session
 
@@ -149,7 +151,12 @@ _EVENT_STATUSES = {
 }
 _EVENT_PATCH_ALLOWLIST = {
     "Event Status", "Checked In", "Decision Notes",
-    "Anticipated Count", "Notes",
+    "Anticipated Count", "Notes", "Staff Attending",
+    # Equipment booleans (existing + B5 additions)
+    "Generator Needed", "Table Needed", "EZ Up Needed",
+    "Massage Chair Needed", "Massage Table Needed",
+    "Banner Needed", "Flyers Needed", "Intake Forms Needed",
+    "Tablet Needed", "Power Strip Needed",
 }
 
 
@@ -559,3 +566,105 @@ async def gorilla_route_delete(request: Request, route_id: int):
     resp = await guerilla_api.gorilla_route_delete(request, br, bt, session, route_id, _cached_rows)
     await _invalidate(T_GOR_ROUTES, T_GOR_ROUTE_STOPS)
     return resp
+
+
+# ─── Kiosk + Consent (kiosk mode) ───────────────────────────────────────────
+
+@router.post("/api/kiosk/start")
+async def kiosk_start(request: Request):
+    """Authenticated rep creates a new kiosk session. Returns {kiosk_id, ...}."""
+    session = await get_session(request)
+    if not session:
+        return JSONResponse({"ok": False, "error": "unauthenticated"}, status_code=401)
+    body = await request.json() or {}
+    try:
+        result = await kiosk_mod.start_kiosk(
+            event_id=int(body.get("event_id") or 0),
+            event_name=str(body.get("event_name") or ""),
+            consent_slugs=list(body.get("consent_slugs") or []),
+            pin=str(body.get("pin") or ""),
+            created_by=session.get("email") or session.get("name") or "",
+        )
+    except ValueError as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=400)
+    return JSONResponse({"ok": True, **result})
+
+
+@router.post("/api/kiosk/exit")
+async def kiosk_exit(request: Request):
+    """Public endpoint — validates PIN against the kiosk session and ends it."""
+    body = await request.json() or {}
+    ok = await kiosk_mod.exit_kiosk(
+        kiosk_id=str(body.get("kiosk_id") or ""),
+        pin=str(body.get("pin") or ""),
+    )
+    if not ok:
+        return JSONResponse({"ok": False, "error": "invalid pin or expired session"}, status_code=401)
+    return JSONResponse({"ok": True})
+
+
+@router.get("/api/kiosk/{kiosk_id}")
+async def kiosk_get(kiosk_id: str):
+    """Public — returns kiosk metadata sans PIN. Includes the consent forms
+    selected by the rep so the run page can render their bodies."""
+    public = await kiosk_mod.get_public_kiosk(kiosk_id)
+    if not public:
+        return JSONResponse({"error": "not found or expired"}, status_code=404)
+    # Hydrate consent form bodies from T_CONSENT_FORMS so the kiosk page can
+    # render them without a second round-trip per form.
+    forms_full: list[dict] = []
+    if public["consent_slugs"]:
+        all_forms = await _cached_rows(T_CONSENT_FORMS)
+        by_slug = {f.get("Slug"): f for f in all_forms}
+        for slug in public["consent_slugs"]:
+            f = by_slug.get(slug)
+            if not f or not f.get("Active"):
+                continue
+            forms_full.append({
+                "id": f.get("id"),
+                "slug": f.get("Slug"),
+                "name": f.get("Display Name") or slug,
+                "version": f.get("Version") or "v1",
+                "body": f.get("Body") or "",
+            })
+    public["consent_forms"] = forms_full
+    return JSONResponse(public)
+
+
+@router.post("/api/kiosk/{kiosk_id}/lead")
+async def kiosk_capture_lead(kiosk_id: str, request: Request):
+    """Public lead capture inside an active kiosk session."""
+    body = await request.json() or {}
+    br, bt = _env()
+    result = await kiosk_mod.capture_lead_via_kiosk(
+        br=br, bt=bt, kiosk_id=kiosk_id,
+        name=str(body.get("name") or ""),
+        phone=str(body.get("phone") or ""),
+        email=str(body.get("email") or ""),
+        reason=str(body.get("reason") or ""),
+        notes=str(body.get("notes") or ""),
+    )
+    if not result.get("ok"):
+        return JSONResponse(result, status_code=400)
+    return JSONResponse(result)
+
+
+@router.post("/api/kiosk/{kiosk_id}/consent")
+async def kiosk_submit_consent(kiosk_id: str, request: Request):
+    """Public consent submission from a kiosk lead. Uploads signature PNG to
+    Bunny and writes a Consent Submissions row."""
+    body = await request.json() or {}
+    br, bt = _env()
+    result = await kiosk_mod.submit_consent(
+        br=br, bt=bt, kiosk_id=kiosk_id,
+        lead_id=int(body.get("lead_id") or 0),
+        consent_form_id=int(body.get("consent_form_id") or 0),
+        form_slug=str(body.get("form_slug") or ""),
+        form_version=str(body.get("form_version") or ""),
+        signed_name=str(body.get("signed_name") or ""),
+        signature_data_url=str(body.get("signature_data_url") or ""),
+        payload=body.get("payload") or {},
+    )
+    if not result.get("ok"):
+        return JSONResponse(result, status_code=400)
+    return JSONResponse(result)

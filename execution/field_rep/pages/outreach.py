@@ -112,7 +112,7 @@ function _actionBtn(venueId) {
            '\\u2713 Added</button>';
   }
   return '<button onclick="event.stopPropagation();addToRoute(' + venueId + ',this)" ' +
-         'style="background:#ea580c;color:#fff;border:none;border-radius:6px;padding:7px 11px;' +
+         'style="background:#004ac6;color:#fff;border:none;border-radius:6px;padding:7px 11px;' +
          'font-size:12px;font-weight:600;cursor:pointer;min-height:34px;white-space:nowrap">' +
          '+ Add to route</button>';
 }
@@ -433,7 +433,7 @@ function plotStops() {{
     }});
     var companyId = _OM_VENUE_TO_CO[stop.venue_id];
     var profileLink = companyId
-      ? '<a href="/company/' + companyId + '" style="font-size:12px;color:#ea580c;font-weight:600;text-decoration:none">View full profile →</a>'
+      ? '<a href="/company/' + companyId + '" style="font-size:12px;color:#004ac6;font-weight:600;text-decoration:none">View full profile →</a>'
       : '';
     var iw = new google.maps.InfoWindow({{
       content: '<div style="font-family:system-ui;max-width:220px">' +

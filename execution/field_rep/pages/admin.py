@@ -33,7 +33,7 @@ def _mobile_admin_page(br: str, bt: str, user: dict = None) -> str:
         '<div id="adm-tabs" style="display:flex;gap:0;margin-bottom:14px;border:1px solid var(--border);'
         'border-radius:8px;overflow:hidden">'
         '<button id="adm-tab-routes" onclick="setAdmTab(\'routes\')" '
-        'style="flex:1;background:#ea580c;color:#fff;border:none;padding:9px;font-size:13px;'
+        'style="flex:1;background:#004ac6;color:#fff;border:none;padding:9px;font-size:13px;'
         'font-weight:600;cursor:pointer">Routes</button>'
         '<button id="adm-tab-activity" onclick="setAdmTab(\'activity\')" '
         'style="flex:1;background:none;color:var(--text2);border:none;padding:9px;font-size:13px;'
@@ -75,12 +75,12 @@ function setAdmTab(t) {{
   if (t === 'activity') {{
     paneR.style.display = 'none'; paneA.style.display = '';
     btnR.style.background = 'none'; btnR.style.color = 'var(--text2)';
-    btnA.style.background = '#ea580c'; btnA.style.color = '#fff';
+    btnA.style.background = '#004ac6'; btnA.style.color = '#fff';
     if (!_activityLoaded) loadAdmActivity();
   }} else {{
     paneA.style.display = 'none'; paneR.style.display = '';
     btnA.style.background = 'none'; btnA.style.color = 'var(--text2)';
-    btnR.style.background = '#ea580c'; btnR.style.color = '#fff';
+    btnR.style.background = '#004ac6'; btnR.style.color = '#fff';
     if (!_routesLoaded) loadAdmRoutes();
   }}
   if (window.history && window.history.replaceState) {{

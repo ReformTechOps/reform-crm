@@ -20,7 +20,7 @@ _GFR_CSS = """
 .gfr-overlay.open .gfr-modal{transform:translateY(0) scale(1);opacity:1}
 .gfr-modal{background:var(--bg2);border:1px solid var(--border);border-radius:14px;width:100%;max-width:660px;overflow:hidden;overflow-x:hidden}
 .gfr-form-modal{max-width:720px}
-.gfr-hdr{background:#ea580c;padding:14px 18px;display:flex;align-items:center;gap:10px}
+.gfr-hdr{background:#004ac6;padding:14px 18px;display:flex;align-items:center;gap:10px}
 .gfr-hdr-title{font-size:15px;font-weight:700;color:#fff}
 .gfr-hdr-user{font-size:12px;color:rgba(255,255,255,.78);margin-left:auto;margin-right:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:160px}
 .gfr-close{background:rgba(255,255,255,.18);border:none;color:#fff;width:28px;height:28px;border-radius:6px;font-size:20px;cursor:pointer;display:flex;align-items:center;justify-content:center;flex-shrink:0;line-height:1}
@@ -28,19 +28,19 @@ _GFR_CSS = """
 .gfr-chooser-body{padding:18px}
 .gfr-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
 .gfr-card{background:var(--bg);border:1px solid var(--border);border-radius:10px;padding:14px;cursor:pointer;transition:all .15s;display:flex;flex-direction:column;gap:5px}
-.gfr-card:hover{border-color:#ea580c;background:rgba(234,88,12,.08)}
+.gfr-card:hover{border-color:#004ac6;background:rgba(0,74,198,.08)}
 .gfr-card-icon{font-size:20px}
 .gfr-card-name{font-size:13px;font-weight:600;color:var(--text)}
 .gfr-card-desc{font-size:11px;color:var(--text3);line-height:1.5}
-.gfr-card-cta{font-size:12px;color:#ea580c;font-weight:600;margin-top:2px}
+.gfr-card-cta{font-size:12px;color:#004ac6;font-weight:600;margin-top:2px}
 .gfr-form-body{padding:0 18px 18px;max-height:72vh;overflow-y:auto;overflow-x:hidden}
 .gfr-section{margin-top:18px}
-.gfr-section-title{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:1px;color:#ea580c;padding-bottom:7px;border-bottom:1px solid var(--border);margin-bottom:13px}
+.gfr-section-title{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:1px;color:#004ac6;padding-bottom:7px;border-bottom:1px solid var(--border);margin-bottom:13px}
 .gfr-field{margin-bottom:12px}
 .gfr-label{font-size:12px;color:var(--text2);margin-bottom:4px;display:block}
 .gfr-label .req{color:#ef4444;margin-left:2px}
 .gfr-input,.gfr-select,.gfr-textarea{width:100%;background:var(--bg);border:1px solid var(--border);border-radius:7px;padding:7px 10px;font-size:13px;color:var(--text);font-family:inherit;box-sizing:border-box}
-.gfr-input:focus,.gfr-select:focus,.gfr-textarea:focus{outline:none;border-color:#ea580c}
+.gfr-input:focus,.gfr-select:focus,.gfr-textarea:focus{outline:none;border-color:#004ac6}
 .gfr-textarea{resize:vertical;min-height:56px}
 .gfr-radio-group{display:flex;gap:14px;flex-wrap:wrap}
 .gfr-radio-group label{display:flex;align-items:center;gap:5px;font-size:13px;color:var(--text2);cursor:pointer}
@@ -53,15 +53,15 @@ _GFR_CSS = """
 .gfr-ta-drop{position:absolute;top:calc(100% + 3px);left:0;right:0;z-index:200;background:var(--bg2);border:1px solid var(--border);border-radius:8px;max-height:180px;overflow-y:auto;display:none}
 .gfr-ta-drop.open{display:block}
 .gfr-ta-item{padding:8px 12px;font-size:13px;color:var(--text2);cursor:pointer}
-.gfr-ta-item:hover{background:rgba(234,88,12,.1);color:var(--text)}
+.gfr-ta-item:hover{background:rgba(0,74,198,.1);color:var(--text)}
 .gfr-ta-new{font-style:italic;color:var(--text3)}
 .gfr-footer{padding:13px 18px;border-top:1px solid var(--border);display:flex;align-items:center;gap:10px}
 .gfr-hipaa{font-size:10px;color:var(--text4);display:flex;align-items:center;gap:4px}
 .gfr-spacer{flex:1}
 .gfr-btn-cancel{background:var(--bg);border:1px solid var(--border);color:var(--text2);padding:7px 15px;border-radius:7px;font-size:13px;cursor:pointer}
 .gfr-btn-cancel:hover{border-color:var(--text3)}
-.gfr-btn-submit{background:#ea580c;border:none;color:#fff;padding:7px 20px;border-radius:7px;font-size:13px;font-weight:600;cursor:pointer}
-.gfr-btn-submit:hover{background:#c2410c}
+.gfr-btn-submit{background:#004ac6;border:none;color:#fff;padding:7px 20px;border-radius:7px;font-size:13px;font-weight:600;cursor:pointer}
+.gfr-btn-submit:hover{background:#003ea8}
 .gfr-btn-submit:disabled{opacity:.5;cursor:not-allowed}
 .gfr-success{padding:36px 20px;text-align:center}
 .gfr-success-icon{font-size:44px;margin-bottom:10px}

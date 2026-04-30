@@ -45,6 +45,13 @@ T_SEQUENCE_ENROLLMENTS = 825
 T_SOCIAL_NOTIFICATIONS = 826
 T_PUSH_SUBSCRIPTIONS   = 827  # Phase 3 push notifications (rep, endpoint, keys)
 
+# ─── Consent forms (kiosk mode) ───────────────────────────────────────────────
+# Catalog of consent docs the kiosk can present (slug, body, version, active)
+# and the per-signature submission ledger. Both live in DB 203 so the
+# submission link_rows can reach T_LEADS (817) and T_EVENTS (816).
+T_CONSENT_FORMS        = 828
+T_CONSENT_SUBMISSIONS  = 829
+
 
 # ─── Leads follow-up pipeline ─────────────────────────────────────────────────
 # Extends the existing T_LEADS (817, in Gorilla Marketing DB 203). Populated

@@ -20,10 +20,7 @@ def _mobile_lead_capture_page(br: str, bt: str, user: dict = None) -> str:
         '</div>'
         '<div class="mobile-body">'
         # ── Toolbar ──────────────────────────────────────────────────
-        '<button onclick="openCaptureModal()" '
-        'style="width:100%;background:#ea580c;color:#fff;border:none;border-radius:8px;'
-        'padding:12px;font-size:15px;font-weight:700;cursor:pointer;min-height:44px;margin-bottom:10px">'
-        '+ New Lead</button>'
+        # "+ New Lead" lives in a FAB (bottom-right) — see end of body.
         '<input type="text" id="leads-search" placeholder="Search name, phone, email, source…" '
         'oninput="onSearchInput()" '
         'style="width:100%;background:var(--input-bg);border:1px solid var(--border);color:var(--text);'
@@ -34,7 +31,7 @@ def _mobile_lead_capture_page(br: str, bt: str, user: dict = None) -> str:
         # Mine/All toggle
         '<div style="display:flex;gap:0;margin-bottom:14px;border:1px solid var(--border);border-radius:8px;overflow:hidden">'
         '<button id="scope-all" onclick="setScope(\'all\')" '
-        'style="flex:1;background:#ea580c;color:#fff;border:none;padding:8px;font-size:13px;font-weight:600;cursor:pointer">'
+        'style="flex:1;background:#004ac6;color:#fff;border:none;padding:8px;font-size:13px;font-weight:600;cursor:pointer">'
         'All</button>'
         '<button id="scope-mine" onclick="setScope(\'mine\')" '
         'style="flex:1;background:none;color:var(--text2);border:none;padding:8px;font-size:13px;font-weight:600;cursor:pointer">'
@@ -45,6 +42,9 @@ def _mobile_lead_capture_page(br: str, bt: str, user: dict = None) -> str:
         '<div style="color:var(--text3);padding:20px;text-align:center">Loading…</div>'
         '</div>'
         '</div>'
+        # ── New Lead FAB (replaces the full-width toolbar button) ────
+        '<button class="fab" onclick="openCaptureModal()" aria-label="New lead">'
+        '<span class="material-symbols-outlined">add</span></button>'
         # ── Capture lead modal ──────────────────────────────────────
         '<div id="capture-modal-bg" onclick="if(event.target===this)closeCaptureModal()" '
         'style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:1100;'
@@ -120,7 +120,7 @@ def _mobile_lead_capture_page(br: str, bt: str, user: dict = None) -> str:
         '</div>'
         # Submit
         '<button id="lf-submit" onclick="submitLead()" '
-        'style="width:100%;background:#ea580c;color:#fff;border:none;border-radius:8px;'
+        'style="width:100%;background:#004ac6;color:#fff;border:none;border-radius:8px;'
         'padding:13px;font-size:15px;font-weight:700;cursor:pointer">'
         'Submit Lead</button>'
         '<div id="lf-status" style="text-align:center;margin-top:10px;font-size:13px;min-height:20px"></div>'
@@ -163,7 +163,7 @@ function renderStatusChips() {{
   var labels = ['All'].concat(_STATUSES);
   box.innerHTML = labels.map(function(s) {{
     var active = (s === _filterStatus);
-    var color = (s === 'All') ? '#ea580c' : (_STATUS_COLORS[s] || '#6b7280');
+    var color = (s === 'All') ? '#004ac6' : (_STATUS_COLORS[s] || '#6b7280');
     var bg = active ? color : 'var(--bg)';
     var fg = active ? '#fff' : 'var(--text2)';
     return '<button onclick="setStatusFilter(\\''+ esc(s) +'\\')" '
@@ -185,10 +185,10 @@ function setScope(scope) {{
   var allBtn = document.getElementById('scope-all');
   var mineBtn = document.getElementById('scope-mine');
   if (scope === 'all') {{
-    allBtn.style.background = '#ea580c'; allBtn.style.color = '#fff';
+    allBtn.style.background = '#004ac6'; allBtn.style.color = '#fff';
     mineBtn.style.background = 'none'; mineBtn.style.color = 'var(--text2)';
   }} else {{
-    mineBtn.style.background = '#ea580c'; mineBtn.style.color = '#fff';
+    mineBtn.style.background = '#004ac6'; mineBtn.style.color = '#fff';
     allBtn.style.background = 'none'; allBtn.style.color = 'var(--text2)';
   }}
   applyFilters();
@@ -242,7 +242,7 @@ function renderLeads(rows) {{
   if (!_leads.length) {{
     box.innerHTML = '<div style="color:var(--text3);padding:30px 10px;text-align:center">'
                   + '<div style="font-size:14px;margin-bottom:10px">No leads yet.</div>'
-                  + '<button onclick="openCaptureModal()" style="background:#ea580c;color:#fff;border:none;'
+                  + '<button onclick="openCaptureModal()" style="background:#004ac6;color:#fff;border:none;'
                   + 'border-radius:8px;padding:10px 18px;font-size:13px;font-weight:600;cursor:pointer">'
                   + '+ Capture your first lead</button></div>';
     return;

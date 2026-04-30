@@ -21,6 +21,7 @@ import redis.asyncio as redis
 _SESSION_TTL = 7 * 24 * 3600
 _OAUTH_TTL   = 300
 _TABLE_TTL   = 120
+_KIOSK_TTL   = 12 * 3600  # kiosk sessions auto-expire after 12 hours
 
 _client: Optional[redis.Redis] = None
 
@@ -93,3 +94,23 @@ async def set_cached_table(tid: int, rows: list) -> None:
 async def invalidate_table(tid: int) -> None:
     """Drop a single cached table — called by write endpoints after they mutate."""
     await _r().delete(f"tbl:{tid}")
+
+
+# ── Kiosk sessions (12h TTL) ─────────────────────────────────────────────────
+# Created by an authenticated rep at /kiosk/setup; the token is then handed out
+# in the public /kiosk/run/{kiosk_id} URL. Session payload includes a 4-digit
+# PIN required to exit kiosk mode and the list of consent form slugs the rep
+# selected.
+async def put_kiosk_session(kiosk_id: str, data: dict) -> None:
+    await _r().set(f"kiosk:{kiosk_id}", json.dumps(data), ex=_KIOSK_TTL)
+
+
+async def get_kiosk_session(kiosk_id: str) -> Optional[dict]:
+    if not kiosk_id:
+        return None
+    raw = await _r().get(f"kiosk:{kiosk_id}")
+    return json.loads(raw) if raw else None
+
+
+async def del_kiosk_session(kiosk_id: str) -> None:
+    await _r().delete(f"kiosk:{kiosk_id}")

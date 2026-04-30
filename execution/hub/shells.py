@@ -88,6 +88,26 @@ def _forbidden_page(br: str, bt: str, user: dict = None) -> str:
 
 
 # ─── Mobile page shell ────────────────────────────────────────────────────────────
+def _build_mobile_bottomnav(active: str) -> str:
+    """Bottom tab bar — the four most-used routes pinned within thumb reach.
+    Drawer (hamburger) holds everything else. Active tab is highlighted blue."""
+    tabs = [
+        ('m_home',     '/',       'dashboard',  'Dashboard'),
+        ('m_routes',   '/routes', 'map',        'Map'),
+        ('m_outreach', '/todo',   'task_alt',   'Tasks'),
+        ('m_lead',     '/lead',   'group',      'Leads'),
+    ]
+    items = []
+    for aid, href, icon, label in tabs:
+        cls = 'm-tab' + (' active' if aid == active else '')
+        items.append(
+            f'<a class="{cls}" href="{href}">'
+            f'<span class="material-symbols-outlined">{icon}</span>'
+            f'<span class="m-tab-lbl">{label}</span></a>'
+        )
+    return '<nav class="m-bottomnav">' + ''.join(items) + '</nav>'
+
+
 def _build_mobile_drawer(active: str, user: dict) -> str:
     """Slide-out drawer for the routes mobile app. Mirrors the hub's tnav-drawer
     pattern but slides in from the left. Admin-only items are gated."""
@@ -102,19 +122,35 @@ def _build_mobile_drawer(active: str, user: dict) -> str:
         cls = f' class="{" ".join(cls_parts)}"' if cls_parts else ''
         return f'<a href="{href}"{cls}>{label}</a>'
 
+    def mlink(aid: str, icon: str, label: str, href: str) -> str:
+        cls_parts = ['tnav-grp-lbl']
+        if aid and aid == active:
+            cls_parts.append('active')
+        cls = ' '.join(cls_parts)
+        return (
+            f'<a href="{href}" class="{cls}">'
+            f'<span class="material-symbols-outlined m-drawer-ic">{icon}</span>'
+            f'<span>{label}</span></a>'
+        )
+
     sep = '<div class="tnav-sep"></div>'
+    # The four most-used routes (Dashboard / Map / Tasks / Leads) live in the
+    # bottom tab bar. Drawer is overflow only.
     items = (
-        link('m_home',         '🏠 Dashboard',         '/',              grp=True)
-        + link('m_routes',     '🗺️ Routes',       '/routes',        grp=True)
-        + link('m_outreach',   '📋 To Do',              '/todo',          grp=True)
-        + link('m_lead',       '🎯 Leads',              '/lead',          grp=True)
-        + link('m_events',     '📅 Events',             '/events',        grp=True)
-        + link('m_directory',  '📇 All Companies',      '/directory',     grp=True)
-        + (link('m_admin',     '🛠️ Admin',             '/admin',         grp=True) if admin else '')
+        mlink('m_events',    'calendar_month', 'Events',         '/events')
+        + mlink('m_kiosk',   'tablet',         'Start Kiosk',    '/kiosk/setup')
+        + mlink('m_directory', 'business',     'All Companies',  '/directory')
+        + (mlink('m_admin',  'settings',       'Admin',          '/admin') if admin else '')
         + sep
-        + '<a href="#" onclick="enableNotifications();return false;">🔔 Enable Notifications</a>'
-        + '<a href="https://hub.reformchiropractic.app">💻 Full Hub</a>'
-        '<a href="/logout" style="color:var(--text3)">Sign Out</a>'
+        + '<a href="#" onclick="enableNotifications();return false;">'
+          '<span class="material-symbols-outlined m-drawer-ic">notifications</span>'
+          '<span>Enable Notifications</span></a>'
+        + '<a href="https://hub.reformchiropractic.app">'
+          '<span class="material-symbols-outlined m-drawer-ic">desktop_windows</span>'
+          '<span>Full Hub</span></a>'
+        + '<a href="/logout" style="color:var(--text3)">'
+          '<span class="material-symbols-outlined m-drawer-ic">logout</span>'
+          '<span>Sign Out</span></a>'
     )
     return (
         '<div class="m-drawer-backdrop" id="m-drawer-backdrop" onclick="closeMDrawer()"></div>'
@@ -135,6 +171,7 @@ def _mobile_page(active: str, title: str, body_html: str, script_js: str,
     shared = _JS_SHARED.format(br=br, bt=bt)
     user = user or {}
     drawer = _build_mobile_drawer(active, user)
+    bottomnav = _build_mobile_bottomnav(active)
     wrap_class = f'mobile-wrap {wrap_cls}'.strip()
     return (
         '<!DOCTYPE html><html lang="en" data-theme="light">'
@@ -142,18 +179,27 @@ def _mobile_page(active: str, title: str, body_html: str, script_js: str,
         '<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,viewport-fit=cover">'
         # ── PWA: manifest + iOS standalone hints + service-worker scope ──
         '<link rel="manifest" href="/manifest.json">'
-        '<meta name="theme-color" content="#ea580c">'
+        '<meta name="theme-color" content="#004ac6">'
         '<meta name="apple-mobile-web-app-capable" content="yes">'
         '<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">'
         '<meta name="apple-mobile-web-app-title" content="Reform">'
         '<link rel="apple-touch-icon" href="/static/icon-192.png">'
+        # Inter (UI font) + Material Symbols (nav icons) — design system fonts
+        '<link rel="preconnect" href="https://fonts.googleapis.com">'
+        '<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>'
+        '<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap">'
+        '<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,400..700,0..1,-50..200&display=swap">'
         f'<title>{title} — Reform</title>'
         f'<style>{_CSS}</style>'
+        '<style>'
+        '.material-symbols-outlined { font-variation-settings: \'FILL\' 0, \'wght\' 400, \'GRAD\' 0, \'opsz\' 24; line-height:1; }'
+        '</style>'
         '</head><body>'
         + drawer
         + f'<div class="{wrap_class}">'
         + body_html
         + '</div>'
+        + bottomnav
         + extra_html
         + f'<script>{shared}\n{extra_js}\n{script_js}\n'
         'function openMDrawer(){'
@@ -286,6 +332,15 @@ async function openLeadModal(leadId) {
       + row('Status', '<select id="lm-status" style="' + inputCss + '">' + stageOpts + '</select>')
       + row('Reason / Service', '<input type="text" id="lm-reason" style="' + inputCss + '" value="' + esc(rs) + '">')
       + row('Source', '<input type="text" id="lm-source" style="' + inputCss + ';opacity:.7" value="' + esc(L.Source || '') + '" readonly>')
+      + (function() {
+          var ev = L.Event;
+          if (!Array.isArray(ev) || !ev.length) return '';
+          var bits = ev.map(function(e) {
+            var nm = e && (e.value || e.name) ? esc(e.value || e.name) : ('Event #' + (e && e.id));
+            return '<a href="/events#' + (e && e.id) + '" style="color:#3b82f6;text-decoration:none">' + nm + '</a>';
+          }).join(', ');
+          return row('From event', '<div style="font-size:13px;color:var(--text);padding:6px 0">' + bits + '</div>');
+        })()
       + row('Follow-Up Date', '<input type="date" id="lm-fu" style="' + inputCss + '" value="' + esc((L['Follow-Up Date'] || '').slice(0,10)) + '">')
       + row('Notes', '<textarea id="lm-notes" rows="3" style="' + inputCss + ';resize:vertical">' + esc(L.Notes || '') + '</textarea>')
       + '<div style="font-size:11px;color:var(--text3);margin-top:6px">Created: ' + esc((L.Created || '').slice(0,10) || '—')

@@ -440,7 +440,7 @@ function renderSheetSkeleton(v) {{
   // ── Dynamic bottom CTA (changes per tab) ─────────────────────────────────
   html += '<div id="m-cta-wrap" style="padding:16px;border-top:1px solid var(--border)">'
     + '<button id="m-cta-btn" onclick="mCtaAction()" '
-    + 'style="width:100%;background:#ea580c;color:#fff;border:none;border-radius:10px;padding:14px;font-size:15px;font-weight:700;cursor:pointer">'
+    + 'style="width:100%;background:#004ac6;color:#fff;border:none;border-radius:10px;padding:14px;font-size:15px;font-weight:700;cursor:pointer">'
     + 'Check In</button></div>';
 
   return html;
@@ -582,11 +582,11 @@ function mSheetTab(el, panelId) {{
   }} else if (panelId.indexOf('mp-acts-') === 0) {{
     _activeTab = 'activity';
     btn.textContent = 'Check In';
-    btn.style.background = '#ea580c';
+    btn.style.background = '#004ac6';
   }} else {{
     _activeTab = 'info';
     btn.textContent = 'Check In';
-    btn.style.background = '#ea580c';
+    btn.style.background = '#004ac6';
   }}
 }}
 function mCtaAction() {{
