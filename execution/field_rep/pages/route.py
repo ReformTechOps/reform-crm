@@ -17,7 +17,8 @@ def _mobile_route_page(br: str, bt: str, user: dict = None,
     """Renders the full-screen route map. If route_id is given, loads that
     specific route; otherwise loads the caller's active/draft route for today."""
     import datetime
-    gk = os.environ.get("GOOGLE_MAPS_API_KEY", "")
+    gk      = os.environ.get("GOOGLE_MAPS_API_KEY", "")
+    gmap_id = os.environ.get("GOOGLE_MAPS_MAP_ID", "")
     user = user or {}
     today_str = datetime.date.today().isoformat()
     user_email = user.get('email', '')
@@ -90,6 +91,7 @@ def _mobile_route_page(br: str, bt: str, user: dict = None,
     )
     route_js = f"""
 const RGK = {repr(gk)};
+const RGMAP_ID = {repr(gmap_id)};
 const _GGOR_VENUES = {T_GOR_VENUES};
 const _GGOR_ACTS   = {T_GOR_ACTS};
 const _GGOR_BOXES  = {T_GOR_BOXES};
@@ -155,11 +157,16 @@ const _GEOFENCE_RADIUS_MI = 0.031;  // ~50m
 if (navigator.geolocation) {{
   navigator.geolocation.watchPosition(function(pos) {{
     _userLat = pos.coords.latitude; _userLng = pos.coords.longitude;
-    if (_rMap && _userMarker) _userMarker.setPosition({{lat:_userLat,lng:_userLng}});
-    else if (_rMap) {{
-      _userMarker = new google.maps.Marker({{position:{{lat:_userLat,lng:_userLng}},map:_rMap,
-        icon:{{path:google.maps.SymbolPath.CIRCLE,scale:7,fillColor:'#2563eb',fillOpacity:1,strokeColor:'#fff',strokeWeight:2}},
-        title:'You',zIndex:999}});
+    if (_rMap && _userMarker) _userMarker.position = {{lat:_userLat, lng:_userLng}};
+    else if (_rMap && google.maps.marker && google.maps.marker.AdvancedMarkerElement) {{
+      // "You are here" pin — small blue dot via custom HTML (PinElement teardrop
+      // is too large/visually noisy for a frequently-updating user-location pin).
+      var udot = document.createElement('div');
+      udot.style.cssText = 'width:14px;height:14px;border-radius:50%;background:#2563eb;border:2px solid #fff;box-shadow:0 0 0 2px rgba(37,99,235,.35)';
+      _userMarker = new google.maps.marker.AdvancedMarkerElement({{
+        position:{{lat:_userLat,lng:_userLng}}, map:_rMap,
+        title:'You', zIndex:999, content: udot,
+      }});
     }}
     checkGeofence(_userLat, _userLng);
   }}, function(){{}}, {{timeout:10000,enableHighAccuracy:true}});
@@ -428,21 +435,24 @@ function openLeftoversPanel() {{
 function initRouteMap() {{
   if (_rMap) return;  // already initialized
   if (!RGK) return;
+  if (!RGMAP_ID) console.warn('GOOGLE_MAPS_MAP_ID is not set — AdvancedMarkers may not render.');
   window._rMapReady = function() {{
     var el = document.getElementById('rmap');
     el.style.height = el.offsetHeight + 'px';
-    _rMap = new google.maps.Map(el, {{
+    var _rMapOpts = {{
       center: {{lat: _GOFF_LAT, lng: _GOFF_LNG}}, zoom: 13,
       mapTypeControl: false, streetViewControl: false,
       styles: [{{featureType:'poi',stylers:[{{visibility:'off'}}]}},
                {{featureType:'transit',stylers:[{{visibility:'off'}}]}}]
-    }});
+    }};
+    if (RGMAP_ID) _rMapOpts.mapId = RGMAP_ID;
+    _rMap = new google.maps.Map(el, _rMapOpts);
     setTimeout(function(){{ google.maps.event.trigger(_rMap, 'resize'); }}, 100);
     // If route data already loaded, render stops
     if (_routeData && _routeData.route) renderRouteStops();
   }};
   var s = document.createElement('script');
-  s.src = 'https://maps.googleapis.com/maps/api/js?key=' + RGK + '&callback=_rMapReady';
+  s.src = 'https://maps.googleapis.com/maps/api/js?key=' + RGK + '&v=weekly&libraries=marker&callback=_rMapReady';
   s.async = true; document.head.appendChild(s);
 }}
 
@@ -477,11 +487,18 @@ function renderRouteStops() {{
   // waypoint (rep returns to office). It is only the START of the polyline
   // when no stops have been completed this run.
   var officePos = {{lat: _GOFF_LAT, lng: _GOFF_LNG}};
-  _rOfficeMarker = new google.maps.Marker({{
+  if (!(google.maps.marker && google.maps.marker.AdvancedMarkerElement)) {{
+    console.warn('AdvancedMarker library missing \u2014 route pins will not render.');
+    return;
+  }}
+  var _rOfficePin = new google.maps.marker.PinElement({{
+    background: '#1e3a5f', borderColor: '#0f1e35',
+    glyphColor: '#fff', glyph: '\u2605', scale: 1.4,
+  }});
+  _rOfficeMarker = new google.maps.marker.AdvancedMarkerElement({{
     position: officePos, map: _rMap,
-    label: {{text: '\u2726', color: '#fff', fontWeight: '700', fontSize: '14px'}},
-    icon: {{path:google.maps.SymbolPath.CIRCLE, scale:16, fillColor:'#1e3a5f', fillOpacity:1, strokeColor:'#fff', strokeWeight:3}},
     title: 'Reform Chiropractic',
+    content: _rOfficePin.element,
     zIndex: 900
   }});
   bounds.extend(officePos);
@@ -498,13 +515,17 @@ function renderRouteStops() {{
     bounds.extend(pos);
     stopsDrawn++;
     var color = _STATUS_COLORS[stop.status] || '#4285f4';
-    var marker = new google.maps.Marker({{
-      position: pos, map: _rMap,
-      label: {{text: String(i+1), color: '#fff', fontWeight: '700', fontSize: '12px'}},
-      icon: {{path:google.maps.SymbolPath.CIRCLE, scale:14, fillColor:color, fillOpacity:1, strokeColor:'#fff', strokeWeight:2}},
-      title: stop.name || ''
+    // Numbered stop pin: status-colored PinElement with the stop number as glyph.
+    var stopPin = new google.maps.marker.PinElement({{
+      background: color, borderColor: '#fff',
+      glyphColor: '#fff', glyph: String(i+1), scale: 1.3,
     }});
-    (function(s) {{ marker.addListener('click', function() {{ openRouteSheet(s); }}); }})(stop);
+    var marker = new google.maps.marker.AdvancedMarkerElement({{
+      position: pos, map: _rMap,
+      title: stop.name || '',
+      content: stopPin.element,
+    }});
+    (function(s) {{ marker.addListener('gmpClick', function() {{ openRouteSheet(s); }}); }})(stop);
     _rMarkers[stop.stop_id] = marker;
   }});
   // Close the loop: return to office at the end of the active stops. Always

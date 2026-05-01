@@ -21,7 +21,8 @@ def _mobile_company_detail_page(br: str, bt: str, company_id: int,
     existing 'Log activity' flow."""
     user = user or {}
     user_name = user.get('name', '')
-    gk = os.environ.get("GOOGLE_MAPS_API_KEY", "")
+    gk      = os.environ.get("GOOGLE_MAPS_API_KEY", "")
+    gmap_id = os.environ.get("GOOGLE_MAPS_MAP_ID", "")
     body = (
         # Header
         '<div class="mobile-hdr">'
@@ -93,6 +94,7 @@ def _mobile_company_detail_page(br: str, bt: str, company_id: int,
     js = f"""
 const COMPANY_ID = {int(company_id)};
 const CGK = {repr(gk)};
+const CGMAP_ID = {repr(gmap_id)};
 const T_LEADS_TID = {int(T_LEADS)};
 const T_GOR_BOXES_TID = {int(T_GOR_BOXES)};
 const T_EVENTS_TID = {int(T_EVENTS)};
@@ -273,25 +275,32 @@ function _initCompanyMap(lat, lng) {{
     // collapses to 0 and Google's tiles never render. Same trick route.py
     // uses at line 145.
     el.style.height = el.offsetHeight + 'px';
-    _cMap = new google.maps.Map(el, {{
+    var _cMapOpts = {{
       center: {{lat: lat, lng: lng}}, zoom: 16,
       mapTypeControl: false, streetViewControl: false,
       styles: [{{featureType:'poi',stylers:[{{visibility:'off'}}]}},
                {{featureType:'transit',stylers:[{{visibility:'off'}}]}}]
-    }});
-    _cMarker = new google.maps.Marker({{
-      position: {{lat: lat, lng: lng}}, map: _cMap,
-      icon: {{path: google.maps.SymbolPath.CIRCLE, scale: 10, fillColor: color,
-              fillOpacity: 1, strokeColor: '#fff', strokeWeight: 2}},
-      title: _COMPANY.Name || ''
-    }});
+    }};
+    if (CGMAP_ID) _cMapOpts.mapId = CGMAP_ID;
+    _cMap = new google.maps.Map(el, _cMapOpts);
+    if (google.maps.marker && google.maps.marker.AdvancedMarkerElement && google.maps.marker.PinElement) {{
+      var _cPin = new google.maps.marker.PinElement({{
+        background: color, borderColor: '#fff',
+        glyphColor: '#fff', glyph: '', scale: 1.2,
+      }});
+      _cMarker = new google.maps.marker.AdvancedMarkerElement({{
+        position: {{lat: lat, lng: lng}}, map: _cMap,
+        title: _COMPANY.Name || '',
+        content: _cPin.element,
+      }});
+    }}
   }}
-  if (window.google && window.google.maps) {{
+  if (window.google && window.google.maps && window.google.maps.marker) {{
     ready();
   }} else {{
     window._cMapReady = ready;
     var s = document.createElement('script');
-    s.src = 'https://maps.googleapis.com/maps/api/js?key=' + CGK + '&callback=_cMapReady';
+    s.src = 'https://maps.googleapis.com/maps/api/js?key=' + CGK + '&v=weekly&libraries=marker&callback=_cMapReady';
     s.async = true; document.head.appendChild(s);
   }}
 }}

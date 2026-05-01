@@ -309,7 +309,8 @@ def _mobile_outreach_map_page(br: str, bt: str, user: dict = None) -> str:
     planning now lives in the hub and reps want a route overview."""
     import os as _os
     from hub.shared import T_COMPANIES as _TC
-    gk = _os.environ.get("GOOGLE_MAPS_API_KEY", "")
+    gk      = _os.environ.get("GOOGLE_MAPS_API_KEY", "")
+    gmap_id = _os.environ.get("GOOGLE_MAPS_MAP_ID", "")
     user = user or {}
     body = (
         '<div class="mobile-hdr">'
@@ -322,6 +323,7 @@ def _mobile_outreach_map_page(br: str, bt: str, user: dict = None) -> str:
     )
     js = f"""
 const GK = {repr(gk)};
+const GMAP_ID = {repr(gmap_id)};
 const OFFICE = {{lat: 33.9478, lng: -118.1335}};  // Downey
 const _STATUS_COLORS = {{'Pending':'#4285f4','Visited':'#059669','Skipped':'#f97316','Not Reached':'#ef4444'}};
 let _OM_MAP = null;
@@ -359,27 +361,36 @@ async function loadOM() {{
   }} else {{
     window._omReady = _omReady;
     var s = document.createElement('script');
-    s.src = 'https://maps.googleapis.com/maps/api/js?key=' + GK + '&callback=_omReady';
+    s.src = 'https://maps.googleapis.com/maps/api/js?key=' + GK + '&v=weekly&libraries=marker&callback=_omReady';
     s.async = true;
     document.head.appendChild(s);
   }}
 }}
 
 function _omReady() {{
-  _OM_MAP = new google.maps.Map(document.getElementById('om-map'), {{
+  if (!GMAP_ID) console.warn('GOOGLE_MAPS_MAP_ID is not set — AdvancedMarkers may not render.');
+  var _omMapOpts = {{
     center: OFFICE,
     zoom: 11,
     mapTypeControl: false,
     streetViewControl: false,
     fullscreenControl: false,
-  }});
+  }};
+  if (GMAP_ID) _omMapOpts.mapId = GMAP_ID;
+  _OM_MAP = new google.maps.Map(document.getElementById('om-map'), _omMapOpts);
+  if (!(google.maps.marker && google.maps.marker.AdvancedMarkerElement && google.maps.marker.PinElement)) {{
+    console.warn('AdvancedMarker library missing — pins will not render.');
+    return;
+  }}
   // Office marker so reps can see their starting point.
-  new google.maps.Marker({{
+  var _omOfficePin = new google.maps.marker.PinElement({{
+    background: '#1e3a5f', borderColor: '#0f1e35',
+    glyphColor: '#fff', glyph: '★', scale: 1.4,
+  }});
+  new google.maps.marker.AdvancedMarkerElement({{
     position: OFFICE, map: _OM_MAP,
     title: 'Reform Chiropractic',
-    icon: {{path: google.maps.SymbolPath.CIRCLE, scale: 14, fillColor: '#1e3a5f',
-            fillOpacity: 1, strokeColor: '#fff', strokeWeight: 3}},
-    label: {{text: '✦', color: '#fff', fontWeight: '700', fontSize: '14px'}},
+    content: _omOfficePin.element,
     zIndex: 800,
   }});
   plotStops();
@@ -388,14 +399,16 @@ function _omReady() {{
     navigator.geolocation.watchPosition(function(pos) {{
       var here = {{lat: pos.coords.latitude, lng: pos.coords.longitude}};
       if (_OM_USER_MARKER) {{
-        _OM_USER_MARKER.setPosition(here);
+        _OM_USER_MARKER.position = here;
       }} else {{
-        _OM_USER_MARKER = new google.maps.Marker({{
+        // "You are here" pin — small blue dot via custom HTML.
+        var _omUdot = document.createElement('div');
+        _omUdot.style.cssText = 'width:14px;height:14px;border-radius:50%;background:#3b82f6;border:2px solid #fff;box-shadow:0 0 0 2px rgba(59,130,246,.35)';
+        _OM_USER_MARKER = new google.maps.marker.AdvancedMarkerElement({{
           position: here, map: _OM_MAP,
-          icon: {{path: google.maps.SymbolPath.CIRCLE, scale: 8, fillColor: '#3b82f6',
-                  fillOpacity: 1, strokeColor: '#fff', strokeWeight: 2}},
           title: 'You are here',
           zIndex: 1000,
+          content: _omUdot,
         }});
         // On first fix, if we had no route to frame the map, center on the rep.
         if (!_OM_STOPS.length) {{
@@ -423,12 +436,14 @@ function plotStops() {{
     var lat = parseFloat(stop.lat), lng = parseFloat(stop.lng);
     if (!lat || !lng || isNaN(lat) || isNaN(lng)) return;
     var color = _STATUS_COLORS[stop.status] || '#4285f4';
-    var marker = new google.maps.Marker({{
+    var stopPin = new google.maps.marker.PinElement({{
+      background: color, borderColor: '#fff',
+      glyphColor: '#fff', glyph: String(i + 1), scale: 1.3,
+    }});
+    var marker = new google.maps.marker.AdvancedMarkerElement({{
       position: {{lat: lat, lng: lng}}, map: _OM_MAP,
-      label: {{text: String(i + 1), color: '#fff', fontWeight: '700', fontSize: '12px'}},
-      icon: {{path: google.maps.SymbolPath.CIRCLE, scale: 14, fillColor: color,
-              fillOpacity: 1, strokeColor: '#fff', strokeWeight: 2}},
       title: stop.name || '',
+      content: stopPin.element,
     }});
     var companyId = _OM_VENUE_TO_CO[stop.venue_id];
     var profileLink = companyId
@@ -442,9 +457,9 @@ function plotStops() {{
                profileLink +
                '</div>',
     }});
-    marker.addListener('click', function() {{ iw.open(_OM_MAP, marker); }});
+    marker.addListener('gmpClick', function() {{ iw.open({{map: _OM_MAP, anchor: marker}}); }});
     _OM_MARKERS.push(marker);
-    bounds.extend(marker.getPosition());
+    bounds.extend({{lat: lat, lng: lng}});
     plotted++;
   }});
   var sub = document.getElementById('om-sub');
