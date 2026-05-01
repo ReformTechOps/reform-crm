@@ -28,6 +28,7 @@ BASEROW_EMAIL = os.getenv("BASEROW_EMAIL")
 BASEROW_PASSWORD = os.getenv("BASEROW_PASSWORD")
 BASEROW_API_TOKEN = os.getenv("BASEROW_API_TOKEN")
 GOOGLE_MAPS_API_KEY = os.getenv("GOOGLE_MAPS_API_KEY")
+GOOGLE_MAPS_MAP_ID  = os.getenv("GOOGLE_MAPS_MAP_ID", "")
 OFFICE_LATLNG = os.getenv("ATTORNEY_MAPPER_OFFICE_LAT_LNG", "34.0522,-118.2437")
 RADIUS_MILES = float(os.getenv("ATTORNEY_MAPPER_RADIUS_MILES", 15))
 
@@ -397,6 +398,7 @@ const ATT_ACTS_TABLE = {ATT_ACTIVITIES_TABLE_ID};
 const OFFICE_LAT = {office_lat};
 const OFFICE_LNG = {office_lng};
 const RADIUS_MILES = {RADIUS_MILES};
+const MAP_ID = "{GOOGLE_MAPS_MAP_ID}";
 
 let map, officeMarker, radiusCircle;
 let attMarkers = {{}};
@@ -449,6 +451,20 @@ function markerIcon(color, scale=9, ringColor=null) {{
   }};
 }}
 
+// AdvancedMarker bridge: wrap legacy {{url, scaledSize, anchor}} icon objects
+// in an <img>. AdvancedMarker anchors content's bottom-center at marker.position,
+// matching the SVG pin-tip anchor.
+function _iconEl(iconObj) {{
+  const img = document.createElement('img');
+  img.src = iconObj.url;
+  if (iconObj.scaledSize) {{
+    img.style.width  = iconObj.scaledSize.width  + 'px';
+    img.style.height = iconObj.scaledSize.height + 'px';
+    img.style.display = 'block';
+  }}
+  return img;
+}}
+
 function homeMarkerIcon() {{
   const w = 34, h = 38;
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${{w}}" height="${{h}}" viewBox="0 0 34 38">`
@@ -464,19 +480,22 @@ function homeMarkerIcon() {{
 }}
 
 function initMap() {{
-  map = new google.maps.Map(document.getElementById("map"), {{
+  if (!MAP_ID) console.warn('GOOGLE_MAPS_MAP_ID is not set — AdvancedMarkers may not render.');
+  const _mapOpts = {{
     center: {{ lat: OFFICE_LAT, lng: OFFICE_LNG }},
     zoom: 12,
     styles: [
       {{featureType:"poi",stylers:[{{visibility:"off"}}]}},
       {{featureType:"transit",stylers:[{{visibility:"off"}}]}},
     ],
-  }});
+  }};
+  if (MAP_ID) _mapOpts.mapId = MAP_ID;
+  map = new google.maps.Map(document.getElementById("map"), _mapOpts);
 
-  officeMarker = new google.maps.Marker({{
+  officeMarker = new google.maps.marker.AdvancedMarkerElement({{
     position: {{ lat: OFFICE_LAT, lng: OFFICE_LNG }},
     map, title: "Reform Chiropractic",
-    icon: homeMarkerIcon(),
+    content: _iconEl(homeMarkerIcon()),
     zIndex: 9999,
   }});
 
@@ -488,12 +507,12 @@ function initMap() {{
   }});
 
   ATTORNEYS.forEach(att => {{
-    const m = new google.maps.Marker({{
+    const m = new google.maps.marker.AdvancedMarkerElement({{
       position: {{ lat: att.lat, lng: att.lng }},
       map, title: att.name,
-      icon: markerIcon(ATT_STATUS_COLORS[att.contactStatus] || "#4285f4", 9, computeRingColor(att.id, attActCache)),
+      content: _iconEl(markerIcon(ATT_STATUS_COLORS[att.contactStatus] || "#4285f4", 9, computeRingColor(att.id, attActCache))),
     }});
-    m.addListener("click", () => openAttSidebar(att.id));
+    m.addListener("gmpClick", () => openAttSidebar(att.id));
     attMarkers[att.id] = m;
   }});
 
@@ -521,14 +540,14 @@ function updateAttVisibility() {{
   ATTORNEYS.forEach(att => {{
     const m = attMarkers[att.id];
     if (!m) return;
-    m.setVisible(activeStatuses.has(att.contactStatus));
+    m.map = activeStatuses.has(att.contactStatus) ? map : null;
     const ring = computeRingColor(att.id, attActCache);
     if (viewMode === "relationship") {{
-      m.setIcon(att.contactStatus === "Active Relationship"
+      m.content = _iconEl(att.contactStatus === "Active Relationship"
         ? markerIcon(relColor(att.totalCases), 9, ring)
         : markerIcon("#555", 0.7, ring));
     }} else {{
-      m.setIcon(markerIcon(ATT_STATUS_COLORS[att.contactStatus] || "#4285f4", 9, ring));
+      m.content = _iconEl(markerIcon(ATT_STATUS_COLORS[att.contactStatus] || "#4285f4", 9, ring));
     }}
   }});
   updateAttStats();
@@ -590,17 +609,16 @@ function setSelectedMarker(id) {{
     const prev = attMarkers[selectedMarkerId];
     if (prev) {{
       const att = ATTORNEYS.find(a => a.id === selectedMarkerId);
-      if (att) prev.setIcon(markerIcon(ATT_STATUS_COLORS[att.contactStatus] || "#4285f4", 9, computeRingColor(att.id, attActCache)));
-      prev.setAnimation(null);
+      if (att) prev.content = _iconEl(markerIcon(ATT_STATUS_COLORS[att.contactStatus] || "#4285f4", 9, computeRingColor(att.id, attActCache)));
+      // prev.setAnimation(null);  // AdvancedMarker has no setAnimation API; pin scale is the selection cue.
     }}
   }}
   selectedMarkerId = id;
   const m = attMarkers[id];
   if (m) {{
     const att = ATTORNEYS.find(a => a.id === id);
-    if (att) m.setIcon(markerIcon(ATT_STATUS_COLORS[att.contactStatus] || "#4285f4", 13, computeRingColor(id, attActCache)));
-    m.setAnimation(google.maps.Animation.BOUNCE);
-    setTimeout(() => {{ if (selectedMarkerId === id) m.setAnimation(null); }}, 600);
+    if (att) m.content = _iconEl(markerIcon(ATT_STATUS_COLORS[att.contactStatus] || "#4285f4", 13, computeRingColor(id, attActCache)));
+    // m.setAnimation(BOUNCE) — not supported on AdvancedMarker. Pin scale 13 instead.
   }}
 }}
 
@@ -609,8 +627,8 @@ function clearSelectedMarker() {{
   const m = attMarkers[selectedMarkerId];
   if (m) {{
     const att = ATTORNEYS.find(a => a.id === selectedMarkerId);
-    if (att) m.setIcon(markerIcon(ATT_STATUS_COLORS[att.contactStatus] || "#4285f4", 9, computeRingColor(att.id, attActCache)));
-    m.setAnimation(null);
+    if (att) m.content = _iconEl(markerIcon(ATT_STATUS_COLORS[att.contactStatus] || "#4285f4", 9, computeRingColor(att.id, attActCache)));
+    // m.setAnimation(null);  // AdvancedMarker has no setAnimation API.
   }}
   selectedMarkerId = null;
 }}
@@ -696,7 +714,7 @@ async function updateAttStatus(id, val) {{
   if (!att) return;
   att.contactStatus = val;
   const m = attMarkers[id];
-  if (m) m.setIcon(markerIcon(ATT_STATUS_COLORS[val] || "#4285f4", 9, computeRingColor(id, attActCache)));
+  if (m) m.content = _iconEl(markerIcon(ATT_STATUS_COLORS[val] || "#4285f4", 9, computeRingColor(id, attActCache)));
   updateAttStats();
   await bpatch(LAW_FIRMS_TABLE, id, {{"Contact Status": {{"value": val}}}});
 }}
@@ -822,7 +840,7 @@ function esc(s) {{
 </script>
 
 <script async defer
-  src="https://maps.googleapis.com/maps/api/js?key={GOOGLE_MAPS_API_KEY}&callback=initMap">
+  src="https://maps.googleapis.com/maps/api/js?key={GOOGLE_MAPS_API_KEY}&v=weekly&libraries=marker&callback=initMap">
 </script>
 </body>
 </html>"""

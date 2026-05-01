@@ -28,6 +28,7 @@ BASEROW_EMAIL = os.getenv("BASEROW_EMAIL")
 BASEROW_PASSWORD = os.getenv("BASEROW_PASSWORD")
 BASEROW_API_TOKEN = os.getenv("BASEROW_API_TOKEN")
 GOOGLE_MAPS_API_KEY = os.getenv("GOOGLE_MAPS_API_KEY")
+GOOGLE_MAPS_MAP_ID  = os.getenv("GOOGLE_MAPS_MAP_ID", "")
 OFFICE_LATLNG = os.getenv("ATTORNEY_MAPPER_OFFICE_LAT_LNG", "34.0522,-118.2437")
 RADIUS_MILES = float(os.getenv("ATTORNEY_MAPPER_RADIUS_MILES", 15))
 
@@ -400,6 +401,7 @@ const BOXES_TABLE = {boxes_table_id};
 const OFFICE_LAT = {office_lat};
 const OFFICE_LNG = {office_lng};
 const RADIUS_MILES = {RADIUS_MILES};
+const MAP_ID = "{GOOGLE_MAPS_MAP_ID}";
 
 let map, officeMarker, radiusCircle;
 let bizMarkers = {{}};
@@ -464,6 +466,20 @@ function markerIcon(color, scale=9, bizType=null, ringColor=null, dropBox=false)
   }};
 }}
 
+// AdvancedMarker bridge: wrap legacy {url, scaledSize, anchor} icon objects in
+// an <img> element. AdvancedMarker anchors the bottom-center of the content
+// at the marker's position, which matches the SVG pin-tip anchor.
+function _iconEl(iconObj) {{
+  const img = document.createElement('img');
+  img.src = iconObj.url;
+  if (iconObj.scaledSize) {{
+    img.style.width  = iconObj.scaledSize.width  + 'px';
+    img.style.height = iconObj.scaledSize.height + 'px';
+    img.style.display = 'block';
+  }}
+  return img;
+}}
+
 function homeMarkerIcon() {{
   const w = 34, h = 38;
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${{w}}" height="${{h}}" viewBox="0 0 34 38">`
@@ -479,19 +495,22 @@ function homeMarkerIcon() {{
 }}
 
 function initMap() {{
-  map = new google.maps.Map(document.getElementById("map"), {{
+  if (!MAP_ID) console.warn('GOOGLE_MAPS_MAP_ID is not set — AdvancedMarkers may not render.');
+  const _mapOpts = {{
     center: {{ lat: OFFICE_LAT, lng: OFFICE_LNG }},
     zoom: 12,
     styles: [
       {{featureType:"poi",stylers:[{{visibility:"off"}}]}},
       {{featureType:"transit",stylers:[{{visibility:"off"}}]}},
     ],
-  }});
+  }};
+  if (MAP_ID) _mapOpts.mapId = MAP_ID;
+  map = new google.maps.Map(document.getElementById("map"), _mapOpts);
 
-  officeMarker = new google.maps.Marker({{
+  officeMarker = new google.maps.marker.AdvancedMarkerElement({{
     position: {{ lat: OFFICE_LAT, lng: OFFICE_LNG }},
     map, title: "Reform Chiropractic",
-    icon: homeMarkerIcon(),
+    content: _iconEl(homeMarkerIcon()),
     zIndex: 9999,
   }});
 
@@ -503,12 +522,12 @@ function initMap() {{
   }});
 
   BUSINESSES.forEach(biz => {{
-    const m = new google.maps.Marker({{
+    const m = new google.maps.marker.AdvancedMarkerElement({{
       position: {{ lat: biz.lat, lng: biz.lng }},
       map, title: biz.name,
-      icon: markerIcon(BIZ_STATUS_COLORS[biz.contactStatus] || "#546E7A", 9, biz.type, computeRingColor(biz.id, bizActCache), hasActiveBox(biz.id)),
+      content: _iconEl(markerIcon(BIZ_STATUS_COLORS[biz.contactStatus] || "#546E7A", 9, biz.type, computeRingColor(biz.id, bizActCache), hasActiveBox(biz.id))),
     }});
-    m.addListener("click", () => openBizSidebar(biz.id));
+    m.addListener("gmpClick", () => openBizSidebar(biz.id));
     bizMarkers[biz.id] = m;
   }});
 
@@ -529,8 +548,8 @@ function updateBizVisibility() {{
   BUSINESSES.forEach(biz => {{
     const m = bizMarkers[biz.id];
     if (!m) return;
-    m.setVisible(activeTypes.has(biz.type) && activeBizStatuses.has(biz.contactStatus));
-    m.setIcon(markerIcon(BIZ_STATUS_COLORS[biz.contactStatus] || "#546E7A", 9, biz.type, computeRingColor(biz.id, bizActCache), hasActiveBox(biz.id)));
+    m.map = (activeTypes.has(biz.type) && activeBizStatuses.has(biz.contactStatus)) ? map : null;
+    m.content = _iconEl(markerIcon(BIZ_STATUS_COLORS[biz.contactStatus] || "#546E7A", 9, biz.type, computeRingColor(biz.id, bizActCache), hasActiveBox(biz.id)));
   }});
   updateBizStats();
 }}
@@ -602,17 +621,16 @@ function setSelectedMarker(id) {{
     const prev = bizMarkers[selectedMarkerId];
     if (prev) {{
       const biz = BUSINESSES.find(b => b.id === selectedMarkerId);
-      if (biz) prev.setIcon(markerIcon(BIZ_STATUS_COLORS[biz.contactStatus] || "#546E7A", 9, biz.type, computeRingColor(biz.id, bizActCache), hasActiveBox(biz.id)));
-      prev.setAnimation(null);
+      if (biz) prev.content = _iconEl(markerIcon(BIZ_STATUS_COLORS[biz.contactStatus] || "#546E7A", 9, biz.type, computeRingColor(biz.id, bizActCache), hasActiveBox(biz.id)));
+      // prev.setAnimation(null);  // AdvancedMarker has no setAnimation API.
     }}
   }}
   selectedMarkerId = id;
   const m = bizMarkers[id];
   if (m) {{
     const biz = BUSINESSES.find(b => b.id === id);
-    if (biz) m.setIcon(markerIcon(BIZ_STATUS_COLORS[biz.contactStatus] || "#546E7A", 13, biz.type, computeRingColor(id, bizActCache), hasActiveBox(id)));
-    m.setAnimation(google.maps.Animation.BOUNCE);
-    setTimeout(() => {{ if (selectedMarkerId === id) m.setAnimation(null); }}, 600);
+    if (biz) m.content = _iconEl(markerIcon(BIZ_STATUS_COLORS[biz.contactStatus] || "#546E7A", 13, biz.type, computeRingColor(id, bizActCache), hasActiveBox(id)));
+    // m.setAnimation(BOUNCE) — not supported on AdvancedMarker. Pin scale conveys selection.
   }}
 }}
 
@@ -621,8 +639,8 @@ function clearSelectedMarker() {{
   const m = bizMarkers[selectedMarkerId];
   if (m) {{
     const biz = BUSINESSES.find(b => b.id === selectedMarkerId);
-    if (biz) m.setIcon(markerIcon(BIZ_STATUS_COLORS[biz.contactStatus] || "#546E7A", 9, biz.type, computeRingColor(biz.id, bizActCache), hasActiveBox(biz.id)));
-    m.setAnimation(null);
+    if (biz) m.content = _iconEl(markerIcon(BIZ_STATUS_COLORS[biz.contactStatus] || "#546E7A", 9, biz.type, computeRingColor(biz.id, bizActCache), hasActiveBox(biz.id)));
+    // m.setAnimation(null);  // AdvancedMarker has no setAnimation API.
   }}
   selectedMarkerId = null;
 }}
@@ -725,7 +743,7 @@ async function updateBizStatus(id, val) {{
   if (!biz) return;
   biz.contactStatus = val;
   const m = bizMarkers[id];
-  if (m) m.setIcon(markerIcon(BIZ_STATUS_COLORS[val] || "#546E7A", 9, biz.type, computeRingColor(id, bizActCache), hasActiveBox(id)));
+  if (m) m.content = _iconEl(markerIcon(BIZ_STATUS_COLORS[val] || "#546E7A", 9, biz.type, computeRingColor(id, bizActCache), hasActiveBox(id)));
   updateBizStats();
   await bpatch(VENUES_TABLE, id, {{"Contact Status": {{"value": val}}}});
 }}
@@ -900,7 +918,7 @@ async function logBox(id) {{
       const m = bizMarkers[id];
       if (m) {{
         const biz = BUSINESSES.find(b => b.id === id);
-        if (biz) m.setIcon(markerIcon(BIZ_STATUS_COLORS[biz.contactStatus]||"#546E7A", 9, biz.type, computeRingColor(id, bizActCache), hasActiveBox(id)));
+        if (biz) m.content = _iconEl(markerIcon(BIZ_STATUS_COLORS[biz.contactStatus]||"#546E7A", 9, biz.type, computeRingColor(id, bizActCache), hasActiveBox(id)));
       }}
       updateBizStats();
       openBizSidebar(id);
@@ -930,7 +948,7 @@ function esc(s) {{
 </script>
 
 <script async defer
-  src="https://maps.googleapis.com/maps/api/js?key={GOOGLE_MAPS_API_KEY}&callback=initMap">
+  src="https://maps.googleapis.com/maps/api/js?key={GOOGLE_MAPS_API_KEY}&v=weekly&libraries=marker&callback=initMap">
 </script>
 </body>
 </html>"""

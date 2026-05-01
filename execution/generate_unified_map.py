@@ -32,6 +32,7 @@ BASEROW_PASSWORD = os.getenv("BASEROW_PASSWORD")
 BASEROW_API_TOKEN = os.getenv("BASEROW_API_TOKEN")
 BASEROW_DATABASE_ID = os.getenv("BASEROW_DATABASE_ID", "197")
 GOOGLE_MAPS_API_KEY = os.getenv("GOOGLE_MAPS_API_KEY")
+GOOGLE_MAPS_MAP_ID  = os.getenv("GOOGLE_MAPS_MAP_ID", "")
 OFFICE_LATLNG = os.getenv("ATTORNEY_MAPPER_OFFICE_LAT_LNG", "34.0522,-118.2437")
 RADIUS_MILES = float(os.getenv("ATTORNEY_MAPPER_RADIUS_MILES", 15))
 
@@ -599,6 +600,7 @@ const BIZ_ACTS_TABLE = {GORILLA_ACTIVITIES_TABLE_ID or 0};
 const OFFICE_LAT = {office_lat};
 const OFFICE_LNG = {office_lng};
 const RADIUS_MILES = {RADIUS_MILES};
+const MAP_ID = "{GOOGLE_MAPS_MAP_ID}";
 
 // ── State ─────────────────────────────────────────────────────────────────────
 let map, officeMarker, radiusCircle;
@@ -675,6 +677,19 @@ function markerIcon(color, scale=9, bizType=null, ringColor=null) {{
   }};
 }}
 
+// AdvancedMarker bridge: wrap legacy {{url, scaledSize, anchor}} icon objects
+// in an <img>. AdvancedMarker anchors content's bottom-center at marker.position.
+function _iconEl(iconObj) {{
+  const img = document.createElement('img');
+  img.src = iconObj.url;
+  if (iconObj.scaledSize) {{
+    img.style.width  = iconObj.scaledSize.width  + 'px';
+    img.style.height = iconObj.scaledSize.height + 'px';
+    img.style.display = 'block';
+  }}
+  return img;
+}}
+
 function homeMarkerIcon() {{
   const w = 34, h = 38;
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${{w}}" height="${{h}}" viewBox="0 0 34 38">` +
@@ -691,19 +706,22 @@ function homeMarkerIcon() {{
 
 // ── Map Init ──────────────────────────────────────────────────────────────────
 function initMap() {{
-  map = new google.maps.Map(document.getElementById("map"), {{
+  if (!MAP_ID) console.warn('GOOGLE_MAPS_MAP_ID is not set — AdvancedMarkers may not render.');
+  const _mapOpts = {{
     center: {{ lat: OFFICE_LAT, lng: OFFICE_LNG }},
     zoom: 12,
     styles: [
       {{featureType:"poi",stylers:[{{visibility:"off"}}]}},
       {{featureType:"transit",stylers:[{{visibility:"off"}}]}},
     ],
-  }});
+  }};
+  if (MAP_ID) _mapOpts.mapId = MAP_ID;
+  map = new google.maps.Map(document.getElementById("map"), _mapOpts);
 
-  officeMarker = new google.maps.Marker({{
+  officeMarker = new google.maps.marker.AdvancedMarkerElement({{
     position: {{ lat: OFFICE_LAT, lng: OFFICE_LNG }},
     map, title: "Reform Chiropractic",
-    icon: homeMarkerIcon(),
+    content: _iconEl(homeMarkerIcon()),
     zIndex: 9999,
   }});
 
@@ -716,24 +734,24 @@ function initMap() {{
 
   // Attorney markers
   ATTORNEYS.forEach(att => {{
-    const m = new google.maps.Marker({{
+    const m = new google.maps.marker.AdvancedMarkerElement({{
       position: {{ lat: att.lat, lng: att.lng }},
       map, title: att.name,
-      icon: markerIcon(ATT_STATUS_COLORS[att.contactStatus] || "#4285f4", 9, null, computeRingColor(att.id, attActCache)),
+      content: _iconEl(markerIcon(ATT_STATUS_COLORS[att.contactStatus] || "#4285f4", 9, null, computeRingColor(att.id, attActCache))),
     }});
-    m.addListener("click", () => openAttSidebar(att.id));
+    m.addListener("gmpClick", () => openAttSidebar(att.id));
     attMarkers[att.id] = m;
   }});
 
-  // Business markers (hidden initially)
+  // Business markers (hidden initially — map: null)
   BUSINESSES.forEach(biz => {{
-    const m = new google.maps.Marker({{
+    const m = new google.maps.marker.AdvancedMarkerElement({{
       position: {{ lat: biz.lat, lng: biz.lng }},
-      map, title: biz.name,
-      icon: markerIcon(BIZ_STATUS_COLORS[biz.contactStatus] || "#546E7A", 9, biz.type, computeRingColor(biz.id, bizActCache)),
-      visible: false,
+      map: null,
+      title: biz.name,
+      content: _iconEl(markerIcon(BIZ_STATUS_COLORS[biz.contactStatus] || "#546E7A", 9, biz.type, computeRingColor(biz.id, bizActCache))),
     }});
-    m.addListener("click", () => openBizSidebar(biz.id));
+    m.addListener("gmpClick", () => openBizSidebar(biz.id));
     bizMarkers[biz.id] = m;
   }});
 
@@ -755,10 +773,10 @@ function switchTab(tab) {{
   document.getElementById("biz-ctrl").className = "ctrl-group" + (tab === "businesses" ? " visible" : "");
 
   if (tab === "attorneys") {{
-    Object.values(bizMarkers).forEach(m => m.setVisible(false));
+    Object.values(bizMarkers).forEach(m => {{ m.map = null; }});
     updateAttVisibility();
   }} else {{
-    Object.values(attMarkers).forEach(m => m.setVisible(false));
+    Object.values(attMarkers).forEach(m => {{ m.map = null; }});
     updateBizVisibility();
   }}
 }}
@@ -784,16 +802,16 @@ function updateAttVisibility() {{
     const m = attMarkers[att.id];
     if (!m) return;
     const visible = activeStatuses.has(att.contactStatus);
-    m.setVisible(visible);
+    m.map = visible ? map : null;
     const ring = computeRingColor(att.id, attActCache);
     if (viewMode === "relationship") {{
       if (att.contactStatus === "Active Relationship") {{
-        m.setIcon(markerIcon(relColor(att.totalCases), 9, null, ring));
+        m.content = _iconEl(markerIcon(relColor(att.totalCases), 9, null, ring));
       }} else {{
-        m.setIcon(markerIcon("#555", 0.7, null, ring));
+        m.content = _iconEl(markerIcon("#555", 0.7, null, ring));
       }}
     }} else {{
-      m.setIcon(markerIcon(ATT_STATUS_COLORS[att.contactStatus] || "#4285f4", 9, null, ring));
+      m.content = _iconEl(markerIcon(ATT_STATUS_COLORS[att.contactStatus] || "#4285f4", 9, null, ring));
     }}
   }});
   updateAttStats();
@@ -813,8 +831,8 @@ function updateBizVisibility() {{
     const m = bizMarkers[biz.id];
     if (!m) return;
     const visible = activeTypes.has(biz.type) && activeBizStatuses.has(biz.contactStatus);
-    m.setVisible(visible);
-    m.setIcon(markerIcon(BIZ_STATUS_COLORS[biz.contactStatus] || "#546E7A", 9, biz.type, computeRingColor(biz.id, bizActCache)));
+    m.map = visible ? map : null;
+    m.content = _iconEl(markerIcon(BIZ_STATUS_COLORS[biz.contactStatus] || "#546E7A", 9, biz.type, computeRingColor(biz.id, bizActCache)));
   }});
   updateBizStats();
 }}
@@ -927,15 +945,15 @@ function setSelectedMarker(type, id) {{
       const prev = attMarkers[selectedMarkerId];
       if (prev) {{
         const att = ATTORNEYS.find(a => a.id === selectedMarkerId);
-        if (att) prev.setIcon(markerIcon(ATT_STATUS_COLORS[att.contactStatus] || "#4285f4", 9, null, computeRingColor(att.id, attActCache)));
-        prev.setAnimation(null);
+        if (att) prev.content = _iconEl(markerIcon(ATT_STATUS_COLORS[att.contactStatus] || "#4285f4", 9, null, computeRingColor(att.id, attActCache)));
+        // prev.setAnimation(null);  // AdvancedMarker has no setAnimation API.
       }}
     }} else {{
       const prev = bizMarkers[selectedMarkerId];
       if (prev) {{
         const biz = BUSINESSES.find(b => b.id === selectedMarkerId);
-        if (biz) prev.setIcon(markerIcon(BIZ_STATUS_COLORS[biz.contactStatus] || "#546E7A", 9, biz.type, computeRingColor(biz.id, bizActCache)));
-        prev.setAnimation(null);
+        if (biz) prev.content = _iconEl(markerIcon(BIZ_STATUS_COLORS[biz.contactStatus] || "#546E7A", 9, biz.type, computeRingColor(biz.id, bizActCache)));
+        // prev.setAnimation(null);  // AdvancedMarker has no setAnimation API.
       }}
     }}
   }}
@@ -945,13 +963,12 @@ function setSelectedMarker(type, id) {{
   if (m) {{
     if (type === "att") {{
       const att = ATTORNEYS.find(a => a.id === id);
-      if (att) m.setIcon(markerIcon(ATT_STATUS_COLORS[att.contactStatus] || "#4285f4", 13, null, computeRingColor(id, attActCache)));
+      if (att) m.content = _iconEl(markerIcon(ATT_STATUS_COLORS[att.contactStatus] || "#4285f4", 13, null, computeRingColor(id, attActCache)));
     }} else {{
       const biz = BUSINESSES.find(b => b.id === id);
-      if (biz) m.setIcon(markerIcon(BIZ_STATUS_COLORS[biz.contactStatus] || "#546E7A", 13, biz.type, computeRingColor(id, bizActCache)));
+      if (biz) m.content = _iconEl(markerIcon(BIZ_STATUS_COLORS[biz.contactStatus] || "#546E7A", 13, biz.type, computeRingColor(id, bizActCache)));
     }}
-    m.setAnimation(google.maps.Animation.BOUNCE);
-    setTimeout(() => {{ if (selectedMarkerId === id) m.setAnimation(null); }}, 600);
+    // m.setAnimation(BOUNCE) — not supported on AdvancedMarker. Pin scale conveys selection.
   }}
 }}
 
@@ -961,15 +978,15 @@ function clearSelectedMarker() {{
     const m = attMarkers[selectedMarkerId];
     if (m) {{
       const att = ATTORNEYS.find(a => a.id === selectedMarkerId);
-      if (att) m.setIcon(markerIcon(ATT_STATUS_COLORS[att.contactStatus] || "#4285f4", 9, null, computeRingColor(att.id, attActCache)));
-      m.setAnimation(null);
+      if (att) m.content = _iconEl(markerIcon(ATT_STATUS_COLORS[att.contactStatus] || "#4285f4", 9, null, computeRingColor(att.id, attActCache)));
+      // m.setAnimation(null);  // AdvancedMarker has no setAnimation API.
     }}
   }} else {{
     const m = bizMarkers[selectedMarkerId];
     if (m) {{
       const biz = BUSINESSES.find(b => b.id === selectedMarkerId);
-      if (biz) m.setIcon(markerIcon(BIZ_STATUS_COLORS[biz.contactStatus] || "#546E7A", 9, biz.type, computeRingColor(biz.id, bizActCache)));
-      m.setAnimation(null);
+      if (biz) m.content = _iconEl(markerIcon(BIZ_STATUS_COLORS[biz.contactStatus] || "#546E7A", 9, biz.type, computeRingColor(biz.id, bizActCache)));
+      // m.setAnimation(null);  // AdvancedMarker has no setAnimation API.
     }}
   }}
   selectedMarkerId = null;
@@ -1080,7 +1097,7 @@ async function updateAttStatus(id, val) {{
   if (!att) return;
   att.contactStatus = val;
   const m = attMarkers[id];
-  if (m) m.setIcon(markerIcon(ATT_STATUS_COLORS[val] || "#4285f4", 9, null, computeRingColor(id, attActCache)));
+  if (m) m.content = _iconEl(markerIcon(ATT_STATUS_COLORS[val] || "#4285f4", 9, null, computeRingColor(id, attActCache)));
   updateAttStats();
   await bpatch(LAW_FIRMS_TABLE, id, {{"Contact Status": {{"value": val}}}});
 }}
@@ -1164,7 +1181,7 @@ async function updateBizStatus(id, val) {{
   if (!biz) return;
   biz.contactStatus = val;
   const m = bizMarkers[id];
-  if (m) m.setIcon(markerIcon(BIZ_STATUS_COLORS[val] || "#546E7A", 9, biz.type, computeRingColor(id, bizActCache)));
+  if (m) m.content = _iconEl(markerIcon(BIZ_STATUS_COLORS[val] || "#546E7A", 9, biz.type, computeRingColor(id, bizActCache)));
   updateBizStats();
   await bpatch(VENUES_TABLE, id, {{"Contact Status": {{"value": val}}}});
 }}
@@ -1306,7 +1323,7 @@ function esc(s) {{
 </script>
 
 <script async defer
-  src="https://maps.googleapis.com/maps/api/js?key={GOOGLE_MAPS_API_KEY}&callback=initMap">
+  src="https://maps.googleapis.com/maps/api/js?key={GOOGLE_MAPS_API_KEY}&v=weekly&libraries=marker&callback=initMap">
 </script>
 </body>
 </html>

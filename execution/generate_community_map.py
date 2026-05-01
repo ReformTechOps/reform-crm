@@ -34,6 +34,7 @@ BASEROW_EMAIL      = os.getenv("BASEROW_EMAIL")
 BASEROW_PASSWORD   = os.getenv("BASEROW_PASSWORD")
 BASEROW_API_TOKEN  = os.getenv("BASEROW_API_TOKEN")
 GOOGLE_MAPS_API_KEY = os.getenv("GOOGLE_MAPS_API_KEY")
+GOOGLE_MAPS_MAP_ID  = os.getenv("GOOGLE_MAPS_MAP_ID", "")
 OFFICE_LATLNG      = os.getenv("ATTORNEY_MAPPER_OFFICE_LAT_LNG", "34.0522,-118.2437")
 RADIUS_MILES       = float(os.getenv("COMMUNITY_RADIUS_MILES",
                            os.getenv("ATTORNEY_MAPPER_RADIUS_MILES", 7)))
@@ -480,6 +481,7 @@ const ACTS_TABLE   = {COMMUNITY_ACTIVITIES_TABLE_ID or 0};
 const OFFICE_LAT   = {office_lat};
 const OFFICE_LNG   = {office_lng};
 const RADIUS_MILES = {RADIUS_MILES};
+const MAP_ID       = "{GOOGLE_MAPS_MAP_ID}";
 
 let map, officeMarker, radiusCircle;
 let orgMarkers = {{}};
@@ -602,6 +604,19 @@ function markerIcon(color, scale=9, orgType=null, ringColor=null) {{
   }};
 }}
 
+// AdvancedMarker bridge: wrap legacy {{url, scaledSize, anchor}} icon objects
+// in an <img>. AdvancedMarker anchors content's bottom-center at marker.position.
+function _iconEl(iconObj) {{
+  const img = document.createElement('img');
+  img.src = iconObj.url;
+  if (iconObj.scaledSize) {{
+    img.style.width  = iconObj.scaledSize.width  + 'px';
+    img.style.height = iconObj.scaledSize.height + 'px';
+    img.style.display = 'block';
+  }}
+  return img;
+}}
+
 function homeMarkerIcon() {{
   const w = 34, h = 38;
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${{w}}" height="${{h}}" viewBox="0 0 34 38">`
@@ -617,19 +632,22 @@ function homeMarkerIcon() {{
 
 // ── Map init ──────────────────────────────────────────────────────────────────
 function initMap() {{
-  map = new google.maps.Map(document.getElementById("map"), {{
+  if (!MAP_ID) console.warn('GOOGLE_MAPS_MAP_ID is not set — AdvancedMarkers may not render.');
+  const _mapOpts = {{
     center: {{ lat: OFFICE_LAT, lng: OFFICE_LNG }},
     zoom: 12,
     styles: [
       {{featureType:"poi",stylers:[{{visibility:"off"}}]}},
       {{featureType:"transit",stylers:[{{visibility:"off"}}]}},
     ],
-  }});
+  }};
+  if (MAP_ID) _mapOpts.mapId = MAP_ID;
+  map = new google.maps.Map(document.getElementById("map"), _mapOpts);
 
-  officeMarker = new google.maps.Marker({{
+  officeMarker = new google.maps.marker.AdvancedMarkerElement({{
     position: {{ lat: OFFICE_LAT, lng: OFFICE_LNG }},
     map, title: "Reform Chiropractic",
-    icon: homeMarkerIcon(),
+    content: _iconEl(homeMarkerIcon()),
     zIndex: 9999,
   }});
 
@@ -641,12 +659,12 @@ function initMap() {{
   }});
 
   ORGS.forEach(org => {{
-    const m = new google.maps.Marker({{
+    const m = new google.maps.marker.AdvancedMarkerElement({{
       position: {{ lat: org.lat, lng: org.lng }},
       map, title: org.name,
-      icon: markerIcon(pinColor(org), 9, org.type, computeRingColor(org.id, actCache)),
+      content: _iconEl(markerIcon(pinColor(org), 9, org.type, computeRingColor(org.id, actCache))),
     }});
-    m.addListener("click", () => openOrgSidebar(org.id));
+    m.addListener("gmpClick", () => openOrgSidebar(org.id));
     orgMarkers[org.id] = m;
   }});
 
@@ -674,8 +692,8 @@ function updateVisibility() {{
     const statusOk = activeStatuses.has(org.contactStatus);
     const top50Ok  = !top50Only || TOP_50_IDS.has(org.id);
     const show = typeOk && statusOk && top50Ok;
-    m.setVisible(show);
-    m.setIcon(markerIcon(pinColor(org), 9, org.type, computeRingColor(org.id, actCache)));
+    m.map = show ? map : null;
+    m.content = _iconEl(markerIcon(pinColor(org), 9, org.type, computeRingColor(org.id, actCache)));
     if (show) anyVisible = true;
   }});
   updateStats();
@@ -785,17 +803,16 @@ function setSelectedMarker(id) {{
     const prev = orgMarkers[selectedMarkerId];
     if (prev) {{
       const org = ORGS.find(o => o.id === selectedMarkerId);
-      if (org) prev.setIcon(markerIcon(pinColor(org), 9, org.type, computeRingColor(org.id, actCache)));
-      prev.setAnimation(null);
+      if (org) prev.content = _iconEl(markerIcon(pinColor(org), 9, org.type, computeRingColor(org.id, actCache)));
+      // prev.setAnimation(null);  // AdvancedMarker has no setAnimation API; pin scale conveys selection.
     }}
   }}
   selectedMarkerId = id;
   const m = orgMarkers[id];
   if (m) {{
     const org = ORGS.find(o => o.id === id);
-    if (org) m.setIcon(markerIcon(pinColor(org), 13, org.type, computeRingColor(id, actCache)));
-    m.setAnimation(google.maps.Animation.BOUNCE);
-    setTimeout(() => {{ if (selectedMarkerId === id) m.setAnimation(null); }}, 600);
+    if (org) m.content = _iconEl(markerIcon(pinColor(org), 13, org.type, computeRingColor(id, actCache)));
+    // m.setAnimation(BOUNCE) — not supported on AdvancedMarker.
   }}
 }}
 
@@ -804,8 +821,8 @@ function clearSelectedMarker() {{
   const m = orgMarkers[selectedMarkerId];
   if (m) {{
     const org = ORGS.find(o => o.id === selectedMarkerId);
-    if (org) m.setIcon(markerIcon(pinColor(org), 9, org.type, computeRingColor(org.id, actCache)));
-    m.setAnimation(null);
+    if (org) m.content = _iconEl(markerIcon(pinColor(org), 9, org.type, computeRingColor(org.id, actCache)));
+    // m.setAnimation(null);  // AdvancedMarker has no setAnimation API.
   }}
   selectedMarkerId = null;
 }}
@@ -923,7 +940,7 @@ async function updateStatus(id, val) {{
   if (!org) return;
   org.contactStatus = val;
   const m = orgMarkers[id];
-  if (m) m.setIcon(markerIcon(pinColor(org), selectedMarkerId === id ? 13 : 9, org.type, computeRingColor(id, actCache)));
+  if (m) m.content = _iconEl(markerIcon(pinColor(org), selectedMarkerId === id ? 13 : 9, org.type, computeRingColor(id, actCache)));
   updateStats();
   const st = document.getElementById(`comm-st-status-${{id}}`);
   if (st) st.textContent = "Saving...";
@@ -967,7 +984,7 @@ async function logActivity(id) {{
       const m = orgMarkers[id];
       if (m) {{
         const org = ORGS.find(o => o.id === id);
-        if (org) m.setIcon(markerIcon(pinColor(org), selectedMarkerId===id?13:9, org.type, computeRingColor(id, actCache)));
+        if (org) m.content = _iconEl(markerIcon(pinColor(org), selectedMarkerId===id?13:9, org.type, computeRingColor(id, actCache)));
       }}
     }} else {{
       if (st) st.textContent = "Failed to save";
@@ -1082,7 +1099,7 @@ function esc(s) {{
 </script>
 
 <script async defer
-  src="https://maps.googleapis.com/maps/api/js?key={GOOGLE_MAPS_API_KEY}&callback=initMap">
+  src="https://maps.googleapis.com/maps/api/js?key={GOOGLE_MAPS_API_KEY}&v=weekly&libraries=marker&callback=initMap">
 </script>
 </body>
 </html>"""
