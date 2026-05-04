@@ -49,8 +49,12 @@ def _mobile_kiosk_setup_page(br: str, bt: str, user: dict | None = None) -> str:
         # PIN
         '<label style="display:block;font-size:11px;font-weight:700;color:var(--text3);text-transform:uppercase;'
         'margin-bottom:4px">Exit PIN (4 digits)</label>'
-        '<input id="ks-pin" type="tel" inputmode="numeric" pattern="[0-9]*" maxlength="4" '
+        # type="text" (not "tel") — the global _mobile_page phone-format
+        # listener targets type="tel" and would render this as "(0000".
+        # inputmode="numeric" still surfaces the numeric keyboard on mobile.
+        '<input id="ks-pin" type="text" inputmode="numeric" pattern="[0-9]*" maxlength="4" '
         'placeholder="0000" autocomplete="off" '
+        'oninput="this.value=this.value.replace(/\\D/g,\'\').slice(0,4)" '
         'style="width:100%;background:var(--input-bg);border:1px solid var(--border);color:var(--text);'
         'border-radius:8px;padding:10px 12px;font-size:18px;letter-spacing:6px;text-align:center;'
         'margin-bottom:14px;font-family:monospace">'
