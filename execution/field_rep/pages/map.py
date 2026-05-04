@@ -5,11 +5,42 @@ import os
 from hub.shared import (
     _mobile_page,
     T_GOR_VENUES, T_GOR_ACTS, T_GOR_BOXES, T_COM_VENUES, T_COM_ACTS,
+    T_GOR_ROUTES, T_GOR_ROUTE_STOPS,
 )
 from hub.guerilla import GFR_EXTRA_HTML, GFR_EXTRA_JS
 from hub.maps import (
     MAP_PALETTE_JS, OFFICE_PIN_JS, PULSE_KEYFRAME_CSS, map_script_url,
 )
+from field_rep.styles import V3_CSS
+
+
+_MAP_PICKER_CSS = """
+<style>
+.m-route-pick { flex:1; min-width:0; padding:6px 10px; border-radius:18px;
+                font-size:12px; font-weight:600; border:none;
+                background:var(--card); color:var(--text);
+                box-shadow:0 1px 4px rgba(0,0,0,.18); appearance:none;
+                -webkit-appearance:none; cursor:pointer; font-family:inherit }
+.m-route-pick:focus { outline:none; box-shadow:0 0 0 2px #004ac6 }
+.m-route-info { width:100%; display:flex; align-items:center; gap:8px;
+                padding:6px 10px; border-radius:10px; background:rgba(0,74,198,.08);
+                color:#1d4ed8; font-size:11px; font-weight:600 }
+.m-route-info-name { flex:1; min-width:0; white-space:nowrap; overflow:hidden;
+                     text-overflow:ellipsis }
+.m-route-info-clear { background:#1d4ed8; color:#fff; border:none; border-radius:6px;
+                      padding:3px 9px; font-size:11px; font-weight:600;
+                      cursor:pointer; font-family:inherit }
+.m-route-stop-marker { width:26px; height:26px; border-radius:50%;
+                       background:#fff; border:2px solid #004ac6;
+                       display:flex; align-items:center; justify-content:center;
+                       color:#004ac6; font-size:11px; font-weight:700;
+                       box-shadow:0 1px 4px rgba(0,0,0,.25) }
+.m-route-stop-marker[data-status="Visited"]      { border-color:#059669; color:#059669 }
+.m-route-stop-marker[data-status="Skipped"]      { border-color:#f97316; color:#f97316 }
+.m-route-stop-marker[data-status="Not Reached"]  { border-color:#ef4444; color:#ef4444 }
+.m-route-stop-marker[data-status="In Progress"]  { background:#004ac6; color:#fff }
+</style>
+"""
 
 
 def _mobile_map_page(br: str, bt: str, user: dict = None) -> str:
@@ -17,15 +48,25 @@ def _mobile_map_page(br: str, bt: str, user: dict = None) -> str:
     gmap_id = os.environ.get("GOOGLE_MAPS_MAP_ID", "")
     user = user or {}
     user_name = user.get('name', '')
+    user_email = (user.get('email', '') or '').strip().lower()
     # Pulse keyframe (gpulse) sourced from hub.maps for parity across pages.
     body = (
-        PULSE_KEYFRAME_CSS
+        V3_CSS
+        + PULSE_KEYFRAME_CSS
+        + _MAP_PICKER_CSS
         # Full-screen map -- breaks out of mobile-wrap via position:fixed
         + '<div class="m-map-wrap" id="gmap">'
         '<div style="display:flex;align-items:center;justify-content:center;height:100%;color:var(--text3);font-size:14px">Loading map...</div>'
         '</div>'
-        # Filter bar: search + tool pills + status pills (single container)
+        # Filter bar: route picker + search + tool pills + status pills
         '<div class="m-map-filters">'
+        '<div style="width:100%;display:flex;align-items:center;gap:6px">'
+        '<select id="m-route-pick" class="m-route-pick" onchange="onRoutePick(this.value)">'
+        '<option value="">— Preview Route —</option>'
+        '</select>'
+        '</div>'
+        '<div id="m-route-info" class="m-route-info" style="display:none"></div>'
+        '<div style="width:100%;height:2px"></div>'
         '<input type="search" id="m-search" placeholder="\U0001f50d Search" oninput="onMSearch(this.value)" enterkeyhint="search"'
         ' style="padding:5px 10px;border-radius:20px;font-size:12px;border:none;background:var(--bg2);color:var(--text1);box-shadow:0 1px 4px rgba(0,0,0,.4);width:90px">'
         '<button class="m-map-filter-btn on" onclick="setMFilter(this,\'all\')" style="padding:5px 10px;font-size:11px">All</button>'
@@ -60,6 +101,8 @@ const _GCOM_TID = {T_COM_VENUES};
 const _GGOR_ACTS = {T_GOR_ACTS};
 const _GCOM_ACTS = {T_COM_ACTS};
 const _GBOXES   = {T_GOR_BOXES};
+const _GROUTES_TID = {T_GOR_ROUTES};
+const _GSTOPS_TID  = {T_GOR_ROUTE_STOPS};
 const _GOFF_LAT = 33.9478, _GOFF_LNG = -118.1335;
 // Color palettes come from hub.maps (MAP_PALETTE_JS injected above). These
 // aliases let existing references to _GSTATUS_COLORS / _GTOOL_BORDER stay
@@ -70,6 +113,13 @@ const _GTOOL_BORDER   = _MAP_TOOL_BORDER;
 var _gVenues = [], _gFilter = 'all', _gStatusFilter = '', _gSearch = '', _gMap, _gMarkers = {{}};
 var _currentVenueM = null;
 var _boxAlerts = {{}};  // venueId -> 'warning' or 'action'
+
+// ── Route preview (dropdown-driven overlay) ───────────────────────────────
+var _routePolyline = null;
+var _routeMarkers  = [];
+var _allRoutes     = [];   // T_GOR_ROUTES rows the user is allowed to see
+var _allStops      = [];   // T_GOR_ROUTE_STOPS rows (loaded once)
+var _activeRouteId = null;
 
 async function bpatch_m(tid, id, data) {{
   return fetch(BR + '/api/database/rows/table/' + tid + '/' + id + '/?user_field_names=true', {{
@@ -691,8 +741,179 @@ async function placeBoxM(venueId) {{
   }}
 }}
 
+// ═══════════════════════════════════════════════════════════════════════════
+// Route preview — populates the <select id="m-route-pick"> with the user's
+// routes (admins see all). Picking a route overlays the stops + polyline on
+// top of the venue map. Reuses _gMap and the venue lat/lng map.
+// ═══════════════════════════════════════════════════════════════════════════
+async function loadRoutesList() {{
+  try {{
+    var [routes, stops] = await Promise.all([
+      fetchAll(_GROUTES_TID),
+      fetchAll(_GSTOPS_TID),
+    ]);
+    var emailLower = (typeof USER_EMAIL === 'string' ? USER_EMAIL : '').toLowerCase();
+    // Field reps see only their own routes; admins (no email match) see all.
+    var mine = emailLower
+      ? routes.filter(function(r) {{
+          return ((r['Assigned To']||'').trim().toLowerCase() === emailLower);
+        }})
+      : routes.slice();
+    // If filtering left nothing (e.g., admin viewing as themselves), show all.
+    if (!mine.length) mine = routes.slice();
+    // Sort: most recent date first, then by name.
+    mine.sort(function(a, b) {{
+      var ad = a['Date'] || '', bd = b['Date'] || '';
+      if (ad !== bd) return bd.localeCompare(ad);
+      return (a['Name']||'').localeCompare(b['Name']||'');
+    }});
+    _allRoutes = mine;
+    _allStops  = stops;
+    var sel = document.getElementById('m-route-pick');
+    if (!sel) return;
+    var opts = ['<option value="">— Preview Route —</option>'];
+    mine.forEach(function(r) {{
+      var label = (r['Name']||'(unnamed)') + (r['Date'] ? ' · ' + r['Date'] : '');
+      opts.push('<option value="' + r.id + '">' + esc(label) + '</option>');
+    }});
+    sel.innerHTML = opts.join('');
+  }} catch(e) {{
+    console.warn('loadRoutesList failed', e);
+  }}
+}}
+
+function clearRoutePreview() {{
+  if (_routePolyline) {{
+    _routePolyline.setMap(null);
+    _routePolyline = null;
+  }}
+  _routeMarkers.forEach(function(m) {{ m.map = null; }});
+  _routeMarkers = [];
+  var info = document.getElementById('m-route-info');
+  if (info) {{ info.style.display = 'none'; info.innerHTML = ''; }}
+  _activeRouteId = null;
+}}
+
+function _routeStopMarker(order, status) {{
+  var el = document.createElement('div');
+  el.className = 'm-route-stop-marker';
+  if (status) el.setAttribute('data-status', status);
+  el.textContent = String(order || '');
+  return el;
+}}
+
+function drawRoutePreview(route, routeStops) {{
+  if (!_gMap) return;
+  // Build venue-id -> venue map from already-loaded _gVenues for coord lookup.
+  var venueMap = {{}};
+  _gVenues.forEach(function(v) {{ venueMap[v.id] = v; }});
+
+  // Sort stops by Stop Order, resolve coords from linked Venue.
+  var enriched = routeStops.slice().sort(function(a, b) {{
+    return (a['Stop Order']||0) - (b['Stop Order']||0);
+  }}).map(function(s) {{
+    var venueId = null;
+    var vlinks = s['Venue'] || [];
+    if (vlinks.length) {{
+      var first = vlinks[0];
+      venueId = (first && typeof first === 'object') ? first.id : first;
+    }}
+    var v = venueId ? venueMap[venueId] : null;
+    var lat = v ? parseFloat(v['Latitude']) : NaN;
+    var lng = v ? parseFloat(v['Longitude']) : NaN;
+    var status = sv(s['Status']) || 'Pending';
+    var name = (v && v['Name']) || s['Name'] || '';
+    return {{
+      stop_id: s.id, venue_id: venueId, name: name, status: status,
+      order: s['Stop Order'] || 0,
+      lat: isFinite(lat) ? lat : null, lng: isFinite(lng) ? lng : null,
+    }};
+  }});
+
+  var mapped = enriched.filter(function(s) {{ return s.lat != null && s.lng != null; }});
+  var totalCount = enriched.length;
+
+  // Update info chip.
+  var info = document.getElementById('m-route-info');
+  if (info) {{
+    var partial = (mapped.length < totalCount)
+      ? ' (' + mapped.length + ' of ' + totalCount + ' mapped)'
+      : '';
+    info.innerHTML =
+      '<span class="m-route-info-name">\U0001f5fa️ ' + esc(route['Name']||'(unnamed)') + '</span>' +
+      '<span>' + totalCount + ' stops' + partial + '</span>' +
+      '<button class="m-route-info-clear" onclick="onRoutePick(\\'\\')">Clear</button>';
+    info.style.display = 'flex';
+  }}
+
+  if (!mapped.length) return;
+
+  // Polyline (only if 2+ mapped stops).
+  if (mapped.length >= 2 && google.maps.Polyline) {{
+    var path = mapped.map(function(s) {{ return {{lat: s.lat, lng: s.lng}}; }});
+    _routePolyline = new google.maps.Polyline({{
+      path: path,
+      strokeColor: '#004ac6',
+      strokeWeight: 3,
+      strokeOpacity: 0.85,
+      map: _gMap,
+    }});
+  }}
+
+  // Numbered markers.
+  if (google.maps.marker && google.maps.marker.AdvancedMarkerElement) {{
+    mapped.forEach(function(s, idx) {{
+      var marker = new google.maps.marker.AdvancedMarkerElement({{
+        position: {{lat: s.lat, lng: s.lng}},
+        map: _gMap,
+        title: (s.order ? '#' + s.order + ' • ' : '') + (s.name || 'Stop'),
+        content: _routeStopMarker(s.order || (idx + 1), s.status),
+        zIndex: 1000 + idx,
+      }});
+      _routeMarkers.push(marker);
+    }});
+  }}
+
+  // Auto-fit bounds.
+  if (mapped.length === 1) {{
+    _gMap.setCenter({{lat: mapped[0].lat, lng: mapped[0].lng}});
+    _gMap.setZoom(15);
+  }} else {{
+    var bounds = new google.maps.LatLngBounds();
+    mapped.forEach(function(s) {{ bounds.extend({{lat: s.lat, lng: s.lng}}); }});
+    _gMap.fitBounds(bounds, 60);
+  }}
+}}
+
+function onRoutePick(routeId) {{
+  clearRoutePreview();
+  if (!routeId) {{
+    var sel = document.getElementById('m-route-pick');
+    if (sel) sel.value = '';
+    return;
+  }}
+  var rid = parseInt(routeId, 10);
+  var route = _allRoutes.find(function(r) {{ return r.id === rid; }});
+  if (!route) return;
+  // Filter stops belonging to this route.
+  var routeStops = _allStops.filter(function(s) {{
+    var rl = s['Route'] || [];
+    return rl.some(function(x) {{
+      return (x && typeof x === 'object') ? x.id === rid : x === rid;
+    }});
+  }});
+  _activeRouteId = rid;
+  drawRoutePreview(route, routeStops);
+}}
+
 loadMapVenues();
+loadRoutesList();
 """
-    script_js = f"const GFR_USER={repr(user_name)};\nconst TOOL = {{venuesT: {T_GOR_VENUES}}};\n" + map_js
+    script_js = (
+        f"const GFR_USER={repr(user_name)};\n"
+        f"const USER_EMAIL={repr(user_email)};\n"
+        f"const TOOL = {{venuesT: {T_GOR_VENUES}}};\n"
+        + map_js
+    )
     return _mobile_page('m_map', 'Map', body, script_js, br, bt, user=user, wrap_cls='map-mode',
                          extra_html=GFR_EXTRA_HTML, extra_js=GFR_EXTRA_JS)

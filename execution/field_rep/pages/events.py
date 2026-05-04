@@ -13,6 +13,8 @@ from hub.shared import (
 )
 from hub.guerilla import GFR_EXTRA_HTML, GFR_EXTRA_JS
 
+from field_rep.styles import V3_CSS
+
 
 def _mobile_events_page(br: str, bt: str, user: dict = None, archive: bool = False) -> str:
     user = user or {}
@@ -56,7 +58,8 @@ def _mobile_events_page(br: str, bt: str, user: dict = None, archive: bool = Fal
     )
 
     body = (
-        '<div class="mobile-hdr">'
+        V3_CSS
+        + '<div class="mobile-hdr">'
         + f'<div><div class="mobile-hdr-title">{title}</div>'
         + f'<div class="mobile-hdr-sub">{subtitle}</div></div>'
         + '<button class="m-hamburger" onclick="openMDrawer()" aria-label="Menu">☰</button>'

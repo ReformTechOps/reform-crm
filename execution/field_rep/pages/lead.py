@@ -7,6 +7,8 @@ from hub.shared import (
 )
 from hub.guerilla import GFR_EXTRA_HTML, GFR_EXTRA_JS
 
+from field_rep.styles import V3_CSS
+
 
 def _mobile_lead_capture_page(br: str, bt: str, user: dict = None) -> str:
     user = user or {}
@@ -89,20 +91,21 @@ def _mobile_lead_capture_page(br: str, bt: str, user: dict = None) -> str:
         '</div>'
     )
     body = (
-        '<div class="mobile-hdr">'
+        V3_CSS
+        + '<div class="mobile-hdr">'
         + '<div><div class="mobile-hdr-title">Leads</div>'
         + '<div class="mobile-hdr-sub">All captured leads</div></div>'
         + '<button class="m-hamburger" onclick="openMDrawer()" aria-label="Menu">☰</button>'
         + '</div>'
         + '<div class="mobile-body">'
-        # 2x stat tiles: total + conversion %
-        + '<div class="stat-grid" style="margin-bottom:18px">'
-        +   '<div class="stat-tile"><div class="stat-label">Active Leads</div>'
-        +     '<div class="stat-value" id="lead-kpi-active">—</div>'
-        +     '<div class="stat-sub" id="lead-kpi-total">of — total</div></div>'
-        +   '<div class="stat-tile"><div class="stat-label">Conversion</div>'
-        +     '<div class="stat-value" id="lead-kpi-conv" style="color:#059669">—</div>'
-        +     '<div class="stat-sub" id="lead-kpi-conv-sub">last 30 days</div></div>'
+        # 2x KPI tiles: active + conversion %
+        + '<div class="kpi-strip cols-2">'
+        +   '<div class="kpi-card"><div class="kpi-label">Active Leads</div>'
+        +     '<div class="kpi-val accent" id="lead-kpi-active">—</div>'
+        +     '<div class="kpi-label" style="margin-top:4px;letter-spacing:0;text-transform:none" id="lead-kpi-total">of — total</div></div>'
+        +   '<div class="kpi-card"><div class="kpi-label">Conversion</div>'
+        +     '<div class="kpi-val ok" id="lead-kpi-conv">—</div>'
+        +     '<div class="kpi-label" style="margin-top:4px;letter-spacing:0;text-transform:none" id="lead-kpi-conv-sub">last 30 days</div></div>'
         + '</div>'
         # Search + Mine/All scope chips inline
         + '<div style="position:relative;margin-bottom:12px">'

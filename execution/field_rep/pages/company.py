@@ -11,6 +11,8 @@ from hub.shared import (
 from hub.guerilla import GFR_EXTRA_HTML, GFR_EXTRA_JS
 from hub.lead_capture_ui import LEAD_CAPTURE_HTML, build_lead_capture_js
 
+from field_rep.styles import V3_CSS
+
 
 def _mobile_company_detail_page(br: str, bt: str, company_id: int,
                                  user: dict = None) -> str:
@@ -24,8 +26,9 @@ def _mobile_company_detail_page(br: str, bt: str, company_id: int,
     gk      = os.environ.get("GOOGLE_MAPS_API_KEY", "")
     gmap_id = os.environ.get("GOOGLE_MAPS_MAP_ID", "")
     body = (
+        V3_CSS
         # Header
-        '<div class="mobile-hdr">'
+        + '<div class="mobile-hdr">'
         '<button class="m-hamburger" onclick="goBack()" aria-label="Back" '
         'style="margin-right:10px">←</button>'
         '<div style="flex:1;min-width:0"><div class="mobile-hdr-title" id="cd-name">Loading…</div>'

@@ -11,6 +11,8 @@ from hub.guerilla import GFR_EXTRA_HTML, GFR_EXTRA_JS
 from hub.maps import MAP_PALETTE_JS, OFFICE_PIN_JS, map_script_url
 from hub.tz import local_today
 
+from field_rep.styles import V3_CSS
+
 
 _HOME_CSS = """
 <style>
@@ -31,70 +33,15 @@ _HOME_CSS = """
 .qlog-btn[data-active="1"] { background:#004ac6; border-color:#004ac6; color:#fff }
 .qlog-btn[data-active="1"] .material-symbols-outlined { color:#fff }
 
-/* KPI strip */
-#kpi-strip { display:grid; grid-template-columns:repeat(3,1fr); gap:8px; margin-bottom:18px }
-.kpi-card { background:var(--card); border:1px solid var(--border); border-radius:12px;
-            padding:12px 8px; text-align:center; text-decoration:none; color:inherit;
-            display:block }
-.kpi-card:active { background:rgba(0,74,198,.06) }
-.kpi-label { font-size:10px; font-weight:600; color:var(--text3);
-             letter-spacing:.6px; margin-bottom:4px }
-.kpi-val { font-size:22px; font-weight:700; color:var(--text); line-height:1 }
+/* KPI strip / events rail / leaderboard / hero-c / count-badge / hero-grad
+   are now provided by V3_CSS (field_rep/styles.py). Home-specific bits only
+   remain below. */
 
-/* Events strip */
+/* events-strip wrapper margin (rail itself styled in V3_CSS). */
 #events-strip { margin-bottom:18px }
-.strip-hdr { display:flex; align-items:baseline; justify-content:space-between;
-             margin-bottom:8px }
-.strip-link { font-size:11px; color:var(--text3); text-decoration:none }
-#events-rail { display:flex; gap:10px; overflow-x:auto;
-               -webkit-overflow-scrolling:touch; scrollbar-width:none;
-               padding-bottom:4px }
-#events-rail::-webkit-scrollbar { display:none }
-.event-card { min-width:180px; padding:12px; border-radius:10px;
-              border:1px solid var(--border); background:var(--card);
-              text-decoration:none; color:inherit; flex-shrink:0;
-              display:flex; flex-direction:column; gap:2px }
-.event-when { font-size:10px; font-weight:700; color:#004ac6;
-              letter-spacing:.4px; margin-bottom:2px; text-transform:uppercase }
-.event-name { font-size:13px; font-weight:600; color:var(--text);
-              display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical;
-              overflow:hidden }
-.event-where { font-size:11px; color:var(--text3);
-               white-space:nowrap; overflow:hidden; text-overflow:ellipsis }
-.event-empty { color:var(--text3); font-size:12px; padding:14px;
-               border:1px dashed var(--border); border-radius:10px;
-               width:100%; text-align:center; flex-shrink:0 }
+#events-rail { margin-bottom:0 }
 
-/* Leaderboard */
-#leaderboard-card { background:var(--card); border:1px solid var(--border);
-                    border-radius:12px; padding:12px 14px; margin-bottom:18px }
-.lb-hdr { display:flex; align-items:baseline; justify-content:space-between;
-          margin-bottom:8px }
-.lb-metric { font-size:11px; color:var(--text3) }
-.lb-row { display:grid; grid-template-columns:24px 1fr auto; gap:10px;
-          align-items:center; padding:6px 0; font-size:13px }
-.lb-row[data-self="1"] { background:rgba(0,74,198,.08); border-radius:6px;
-                         padding:6px 8px; margin:0 -8px }
-.lb-rank { color:var(--text3); font-weight:600; text-align:center }
-.lb-name { color:var(--text); font-weight:500;
-           white-space:nowrap; overflow:hidden; text-overflow:ellipsis }
-.lb-val { color:#004ac6; font-weight:700 }
-.lb-divider { height:1px; background:var(--border); margin:6px 0 }
-
-/* Worklist count badge */
-#wl-ct { background:#fee2e2; color:#b91c1c; padding:2px 9px;
-         border-radius:999px; font-size:11px; font-weight:600 }
-#wl-ct:empty { display:none }
-.hero-c { padding:18px 20px; color:#fff;
-          background:linear-gradient(135deg,#004ac6,#0066ee);
-          border-radius:12px; border:none }
-.hero-c .label-caps { color:rgba(255,255,255,.78) }
-.hero-c .h-actions { display:flex; gap:8px; margin-top:14px }
-.hero-c .h-actions button { flex:1; border:none; border-radius:8px;
-                            padding:11px 10px; font-size:13px; font-weight:700;
-                            cursor:pointer; font-family:inherit }
-.hero-c .h-primary { background:#fff; color:#004ac6 }
-.hero-c .h-secondary { background:rgba(255,255,255,.18); color:#fff }
+/* Yesterday recap dashed card (home-only). */
 .recap-card { display:block; text-align:center; padding:10px; font-size:12px;
               color:var(--text3); border:1px dashed var(--border);
               border-radius:10px; text-decoration:none; background:transparent }
@@ -114,9 +61,8 @@ _HOME_CSS = """
              padding:6px 10px; border-top:1px solid var(--border);
              min-height:14px }
 
-/* Desktop: cap content column width and bump map height. */
+/* Desktop: bump embedded map height. (Width cap is in V3_CSS.) */
 @media (min-width: 720px) {
-  .mobile-body { max-width:520px; margin-left:auto; margin-right:auto }
   #hm-map { height:300px }
 }
 </style>
@@ -139,6 +85,7 @@ def _mobile_home_page(br: str, bt: str, user: dict = None) -> str:
         + f'<div class="mobile-hdr-sub">{day_str}</div></div>'
         + '<button class="m-hamburger" onclick="openMDrawer()" aria-label="Menu">☰</button>'
         + '</div>'
+        + V3_CSS
         + _HOME_CSS
         + '<div class="mobile-body">'
         + '<div id="home-root" data-state="A">'
@@ -152,7 +99,7 @@ def _mobile_home_page(br: str, bt: str, user: dict = None) -> str:
         +   '<div class="only-c" id="hero-c"></div>'
         + '</div>'
         # ── KPI strip (rep-scoped 7d) ──────────────────────────────────────
-        + '<div id="kpi-strip">'
+        + '<div id="kpi-strip" class="kpi-strip">'
         +   '<a href="/lead" class="kpi-card">'
         +     '<div class="kpi-label">LEADS (7D)</div>'
         +     '<div class="kpi-val" id="kpi-leads">—</div></a>'
@@ -205,7 +152,7 @@ def _mobile_home_page(br: str, bt: str, user: dict = None) -> str:
         + '<div class="label-caps" style="display:flex;align-items:center;gap:6px;margin-bottom:8px">'
         +   '<span class="material-symbols-outlined" style="font-size:14px;color:#ba1a1a">priority_high</span>'
         +   '<span>Worklist</span>'
-        +   '<span id="wl-ct" style="margin-left:auto"></span></div>'
+        +   '<span id="wl-ct" class="count-badge" style="margin-left:auto"></span></div>'
         + '<div id="wl-body" style="display:flex;flex-direction:column;gap:10px;margin-bottom:18px">'
         +   '<div class="card" style="color:var(--text3);text-align:center;font-size:13px">Loading…</div>'
         + '</div>'
@@ -982,7 +929,8 @@ def _mobile_routes_dashboard_page(br: str, bt: str, user: dict = None) -> str:
     user = user or {}
     user_email = (user.get('email', '') or '').strip().lower()
     body = (
-        '<div class="mobile-hdr">'
+        V3_CSS
+        + '<div class="mobile-hdr">'
         '<div><div class="mobile-hdr-title">My Routes</div>'
         '<div class="mobile-hdr-sub">All your assigned routes</div></div>'
         '<button class="m-hamburger" onclick="openMDrawer()" aria-label="Menu">☰</button>'
@@ -994,9 +942,9 @@ def _mobile_routes_dashboard_page(br: str, bt: str, user: dict = None) -> str:
         '<div><div id="today-cta-title">Start Today\'s Route</div>'
         '<div class="mobile-cta-sub" id="today-cta-sub">Loading…</div></div>'
         '</a>'
-        # Stat cards
-        '<div id="m-stats" style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:16px">'
-        '<div class="loading">Loading…</div></div>'
+        # Stat cards (V3 kpi-strip layout)
+        '<div id="m-stats" class="kpi-strip cols-4" style="margin-bottom:16px">'
+        '<div class="kpi-card"><div class="kpi-label">Loading…</div></div></div>'
         # Route list
         '<div id="m-route-list"><div class="loading">Loading…</div></div>'
         # Past routes toggle
@@ -1070,18 +1018,18 @@ async function load() {{
   var pctColor = pct >= 80 ? '#059669' : pct >= 50 ? '#d97706' : '#ef4444';
 
   document.getElementById('m-stats').innerHTML =
-    '<div style="background:var(--card);border:1px solid var(--border);border-radius:10px;padding:12px;text-align:center">'
-    + '<div style="font-size:22px;font-weight:800;color:#004ac6">' + routes.length + '</div>'
-    + '<div style="font-size:10px;color:var(--text3);text-transform:uppercase">Routes</div></div>'
-    + '<div style="background:var(--card);border:1px solid var(--border);border-radius:10px;padding:12px;text-align:center">'
-    + '<div style="font-size:22px;font-weight:800;color:#059669">' + visited + '<span style="font-size:12px;color:var(--text3)">/' + totalStops + '</span></div>'
-    + '<div style="font-size:10px;color:var(--text3);text-transform:uppercase">Visited</div></div>'
-    + '<div style="background:var(--card);border:1px solid var(--border);border-radius:10px;padding:12px;text-align:center">'
-    + '<div style="font-size:22px;font-weight:800;color:' + pctColor + '">' + pct + '%</div>'
-    + '<div style="font-size:10px;color:var(--text3);text-transform:uppercase">Complete</div></div>'
-    + '<div style="background:var(--card);border:1px solid var(--border);border-radius:10px;padding:12px;text-align:center">'
-    + '<div style="font-size:22px;font-weight:800;color:' + (missedTotal > 0 ? '#ef4444' : '#059669') + '">' + missedTotal + '</div>'
-    + '<div style="font-size:10px;color:var(--text3);text-transform:uppercase">Missed</div></div>';
+    '<div class="kpi-card">'
+    + '<div class="kpi-label">Routes</div>'
+    + '<div class="kpi-val accent">' + routes.length + '</div></div>'
+    + '<div class="kpi-card">'
+    + '<div class="kpi-label">Visited</div>'
+    + '<div class="kpi-val ok">' + visited + '<span style="font-size:12px;color:var(--text3);font-weight:600">/' + totalStops + '</span></div></div>'
+    + '<div class="kpi-card">'
+    + '<div class="kpi-label">Complete</div>'
+    + '<div class="kpi-val" style="color:' + pctColor + '">' + pct + '%</div></div>'
+    + '<div class="kpi-card">'
+    + '<div class="kpi-label">Missed</div>'
+    + '<div class="kpi-val ' + (missedTotal > 0 ? 'bad' : 'ok') + '">' + missedTotal + '</div></div>';
 
   // Split into upcoming vs past
   var upcoming = routes.filter(function(r) {{
@@ -1110,10 +1058,10 @@ async function load() {{
     var total = myStops.length;
     var rpct = total ? Math.round(v/total*100) : 0;
 
-    var h = '<a href="/routes/'+rid+'" style="display:block;background:var(--card);border:1px solid var(--border);border-radius:10px;padding:14px;margin-bottom:10px;text-decoration:none;color:inherit">';
-    h += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">';
-    h += '<div style="font-size:14px;font-weight:700">'+esc(row['Name']||'(unnamed)')+'</div>';
-    h += '<span style="font-size:10px;background:'+sc+'20;color:'+sc+';border-radius:4px;padding:2px 7px;font-weight:600">'+esc(status)+'</span>';
+    var h = '<a href="/routes/'+rid+'" class="card-soft" style="margin-bottom:10px">';
+    h += '<div class="card-row" style="margin-bottom:6px">';
+    h += '<div class="card-soft-title">'+esc(row['Name']||'(unnamed)')+'</div>';
+    h += '<span class="pill" style="background:'+sc+'20;color:'+sc+'">'+esc(status)+'</span>';
     h += '</div>';
     h += '<div style="font-size:11px;color:var(--text3);margin-bottom:8px">'+fmt(row['Date']||'')+' • '+total+' stops</div>';
     // Stats

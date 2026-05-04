@@ -6,6 +6,8 @@ from hub.shared import (
     _mobile_page,
 )
 
+from field_rep.styles import V3_CSS
+
 
 def _mobile_outreach_due_page(br: str, bt: str, user: dict = None) -> str:
     """To Do dashboard — combines two action-required lists for a rep:
@@ -21,18 +23,19 @@ def _mobile_outreach_due_page(br: str, bt: str, user: dict = None) -> str:
     home-page Boxes Due panel uses)."""
     user = user or {}
     body = (
-        '<div class="mobile-hdr">'
+        V3_CSS
+        + '<div class="mobile-hdr">'
         + '<div><div class="mobile-hdr-title">To Do</div>'
         + '<div class="mobile-hdr-sub">Follow-ups due + stops you skipped</div></div>'
         + '<button class="m-hamburger" onclick="openMDrawer()" aria-label="Menu">☰</button>'
         + '</div>'
         + '<div class="mobile-body">'
-        # Daily Overview stat tiles (3 across — natural fit for 3 KPIs)
+        # Daily Overview KPI strip (V3 primitives)
         + '<div class="label-caps" style="margin-bottom:8px">Daily Overview</div>'
-        + '<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:18px">'
-        +   '<div class="stat-tile"><div class="stat-label">Total</div><div class="stat-value" id="td-kpi-total">—</div></div>'
-        +   '<div class="stat-tile"><div class="stat-label">Skipped</div><div class="stat-value" id="td-kpi-skipped" style="color:#d97706">—</div></div>'
-        +   '<div class="stat-tile"><div class="stat-label">Worst</div><div class="stat-value" id="td-kpi-worst" style="color:#ba1a1a">—</div></div>'
+        + '<div class="kpi-strip">'
+        +   '<div class="kpi-card"><div class="kpi-label">Total</div><div class="kpi-val" id="td-kpi-total">—</div></div>'
+        +   '<div class="kpi-card"><div class="kpi-label">Skipped</div><div class="kpi-val warn" id="td-kpi-skipped">—</div></div>'
+        +   '<div class="kpi-card"><div class="kpi-label">Worst</div><div class="kpi-val bad" id="td-kpi-worst">—</div></div>'
         + '</div>'
         + '<div id="td-route-banner" style="display:none;margin-bottom:16px"></div>'
         + '<div class="label-caps" id="td-fu-hdr" style="margin-bottom:8px">Overdue Follow-Ups</div>'

@@ -12,6 +12,8 @@ from hub.contact_detail import contact_actions_js
 from hub.lead_capture_ui import LEAD_CAPTURE_HTML, build_lead_capture_js
 from hub.tz import local_today
 
+from field_rep.styles import V3_CSS
+
 
 def _mobile_route_page(br: str, bt: str, user: dict = None,
                        route_id: int = None) -> str:
@@ -26,8 +28,9 @@ def _mobile_route_page(br: str, bt: str, user: dict = None,
     # Endpoint is chosen server-side so the same JS handles both paths.
     route_endpoint = f"/api/guerilla/routes/{int(route_id)}" if route_id else "/api/guerilla/routes/today"
     body = (
+        V3_CSS
         # Full-screen map for route
-        '<div class="m-map-wrap" id="rmap"></div>'
+        + '<div class="m-map-wrap" id="rmap"></div>'
         # "No Active Routes" overlay (shown/hidden by JS)
         '<div id="rt-empty" style="display:none;position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);z-index:105;text-align:center;pointer-events:none">'
         '<div style="background:var(--bg2);border-radius:16px;padding:28px 36px;box-shadow:0 4px 20px rgba(0,0,0,.3)">'
