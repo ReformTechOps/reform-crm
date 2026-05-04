@@ -441,6 +441,24 @@ async def guerilla_log(request: Request, br: str, bt: str, user: dict,
             ev_fields["Indoor Outdoor"] = fields["indoor_outdoor"]
         if venue_id:
             ev_fields["Business"] = [venue_id]
+        # Equipment booleans (mirrors the edit modal in
+        # field_rep/pages/events.py:_EQUIPMENT_FIELDS) — set true for each
+        # selected equipment column.
+        equipment = fields.get("equipment_needed") or []
+        if isinstance(equipment, list):
+            VALID_EQUIPMENT = {
+                "Massage Chair Needed", "Massage Table Needed", "Table Needed",
+                "EZ Up Needed", "Banner Needed", "Flyers Needed",
+                "Intake Forms Needed", "Tablet Needed", "Power Strip Needed",
+                "Generator Needed",
+            }
+            for col in equipment:
+                if col in VALID_EQUIPMENT:
+                    ev_fields[col] = True
+        # Staff Attending — comma-joined list of emails (long_text column).
+        staff_attending = (fields.get("staff_attending") or "").strip()
+        if staff_attending:
+            ev_fields["Staff Attending"] = staff_attending
         try:
             async with httpx.AsyncClient(timeout=60) as ev_client:
                 er = await ev_client.post(

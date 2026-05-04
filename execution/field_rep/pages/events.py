@@ -35,7 +35,9 @@ def _mobile_events_page(br: str, bt: str, user: dict = None, archive: bool = Fal
     next_up_slot    = '' if archive else '<div id="evt-next-up" style="margin-bottom:16px"></div>'
     fab_html = (
         '' if archive else
-        '<button class="fab" onclick="openGFRChooser()" aria-label="Schedule event">'
+        # Schedule-event entry point: skip the check-in/interaction parts
+        # of External Event since the user is here explicitly to create one.
+        '<button class="fab" onclick="openGFRChooser({event_only:true})" aria-label="Schedule event">'
         '<span class="material-symbols-outlined">add</span></button>'
     )
     list_section_label = 'Past events' if archive else 'Upcoming events'

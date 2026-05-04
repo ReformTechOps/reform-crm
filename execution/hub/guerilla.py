@@ -35,6 +35,17 @@ _GFR_CSS = """
 .gfr-card-cta{font-size:12px;color:#004ac6;font-weight:600;margin-top:2px}
 .gfr-form-body{padding:0 18px 18px;max-height:72vh;overflow-y:auto;overflow-x:hidden}
 .gfr-section{margin-top:18px}
+/* Event-only mode (External Event opened from /events FAB): hide the
+   "Is there an event here?" toggle + Interaction Details direct children
+   of #gfr-body-s2. The s2-event-block keeps its nested .gfr-sections. */
+.gfr-form-modal.s2-event-only #gfr-body-s2 > .gfr-section{display:none}
+/* Equipment + Staff checklists shared by all 4 event creation forms. */
+.gfr-extras-grid{display:grid;grid-template-columns:1fr 1fr;gap:6px 12px}
+.gfr-extras-row{display:flex;align-items:center;gap:6px;font-size:13px;color:var(--text);cursor:pointer}
+.gfr-extras-row input[type=checkbox]{width:16px;height:16px;accent-color:#004ac6}
+.gfr-extras-staff{background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:8px 10px;font-size:13px;color:var(--text3);max-height:200px;overflow-y:auto}
+.gfr-extras-staff label{display:flex;align-items:center;gap:6px;padding:3px 0;color:var(--text);cursor:pointer}
+.gfr-extras-staff input[type=checkbox]{width:15px;height:15px;accent-color:#004ac6}
 .gfr-section-title{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:1px;color:#004ac6;padding-bottom:7px;border-bottom:1px solid var(--border);margin-bottom:13px}
 .gfr-field{margin-bottom:12px}
 .gfr-label{font-size:12px;color:var(--text2);margin-bottom:4px;display:block}
@@ -187,7 +198,14 @@ _GFR_HTML = (
 # ---------------------------------------------------------------------------
 _GFR_JS = """
 // -- GFR chooser ----------------------------------------------------------
-function openGFRChooser(){document.getElementById('gfr-chooser').classList.add('open')}
+// Event-only mode: when the chooser is opened from the /events page (FAB),
+// the External Event form should skip the Check-In/Interaction sections —
+// the user is here to schedule an event, not log a venue check-in.
+var _gfrEventOnly = false;
+function openGFRChooser(opts){
+  _gfrEventOnly = !!(opts && opts.event_only);
+  document.getElementById('gfr-chooser').classList.add('open');
+}
 function closeGFRChooser(){document.getElementById('gfr-chooser').classList.remove('open')}
 function openGFRForm(ft){
   closeGFRChooser();
@@ -464,6 +482,48 @@ def _gfr_dt(p):
         + '</div>'
     )
 
+
+# Equipment field map mirrors _EQUIPMENT_FIELDS in field_rep/pages/events.py.
+# Pairs are (T_EVENTS column name, user-facing label). Bool flags written to
+# the row when the form is submitted.
+_GFR_EQUIPMENT_FIELDS = [
+    ('Massage Chair Needed', 'Massage chair'),
+    ('Massage Table Needed', 'Massage table'),
+    ('Table Needed',         'Folding table'),
+    ('EZ Up Needed',         'EZ Up tent'),
+    ('Banner Needed',        'Banner'),
+    ('Flyers Needed',        'Flyers'),
+    ('Intake Forms Needed',  'Intake forms'),
+    ('Tablet Needed',        'Tablet'),
+    ('Power Strip Needed',   'Power strip'),
+    ('Generator Needed',     'Generator'),
+]
+
+
+def _gfr_extras(p):
+    """Equipment-to-bring + Staff-attending checklist sections shared by all
+    four event creation forms. The submit() helpers in JS read the checked
+    state via [data-gfr-eq] / [data-gfr-staff] attributes."""
+    eq_rows = ''
+    for field_name, label in _GFR_EQUIPMENT_FIELDS:
+        slug = field_name.replace(' ', '-').lower()
+        eq_rows += (
+            f'<label class="gfr-extras-row">'
+            f'<input type="checkbox" data-gfr-form="{p}" data-gfr-eq="{field_name}" '
+            f'id="{p}-eq-{slug}">'
+            f'<span>{label}</span></label>'
+        )
+    return (
+        '<div class="gfr-section">'
+        '<div class="gfr-section-title">Equipment to Bring</div>'
+        '<div class="gfr-extras-grid">' + eq_rows + '</div>'
+        '</div>'
+        '<div class="gfr-section">'
+        '<div class="gfr-section-title">Staff Attending</div>'
+        f'<div class="gfr-extras-staff" id="{p}-staff-list">Loading staff…</div>'
+        '</div>'
+    )
+
 def _gfr_foot(p, fn):
     """Form footer: HIPAA badge + Cancel + Submit."""
     return (
@@ -529,6 +589,7 @@ _GFR_FORMS345_HTML = (
     )
     + _gfr_dt_row('s3')
     + '</div>'   # close service section
+    + _gfr_extras('s3')
     + '</div>'   # close form-body
     + _gfr_foot('s3', 's3Submit')
     + '</div></div>'  # close modal + overlay
@@ -606,6 +667,7 @@ _GFR_FORMS345_HTML = (
         '<textarea class="gfr-textarea" id="s4-products" placeholder="What does this company offer?\u2026"></textarea></div>'
         '</div>'
     )
+    + _gfr_extras('s4')
     + _gfr_dt('s4')
     + '</div>'   # close form-body
     + _gfr_foot('s4', 's4Submit')
@@ -649,6 +711,7 @@ _GFR_FORMS345_HTML = (
         '<textarea class="gfr-textarea" id="s5-products" placeholder="What does this company offer?\u2026"></textarea></div>'
         '</div>'
     )
+    + _gfr_extras('s5')
     + _gfr_dt('s5')
     + '</div>'   # close form-body
     + _gfr_foot('s5', 's5Submit')
@@ -818,6 +881,7 @@ _GFR_FORM2_HTML = (
         '<input class="gfr-input" id="s2-industry" type="text" placeholder="e.g. Healthcare, Retail\u2026"></div>'
         '</div>'
     )
+    + _gfr_extras('s2')
     + _gfr_dt('s2')
     + '</div>'   # close s2-event-block
     + '</div>'   # close form-body
@@ -890,14 +954,88 @@ function _gfrBaseReset(p,radioNames,extraIds,extraSels){
   var btn=document.getElementById(p+'-submit');if(btn){btn.disabled=false;btn.textContent='Submit';}
 }
 
+// -- Equipment + Staff helpers (shared by all 4 event creation forms) ----
+// _gfrLoadStaff renders the staff checkbox list into #<p>-staff-list. Cached
+// in memory so multiple form opens don't refetch. Endpoint: /api/staff.
+var _GFR_STAFF_CACHE = null;
+function _gfrEsc(s){
+  return String(s == null ? '' : s)
+    .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+    .replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+}
+async function _gfrLoadStaff(p){
+  var box = document.getElementById(p + '-staff-list');
+  if(!box) return;
+  try{
+    if(!_GFR_STAFF_CACHE){
+      var r = await fetch('/api/staff');
+      if(!r.ok){ box.innerHTML = '<span style="color:var(--text3);font-size:12px">Staff list unavailable.</span>'; return; }
+      var j = await r.json();
+      _GFR_STAFF_CACHE = j.staff || [];
+    }
+    if(!_GFR_STAFF_CACHE.length){
+      box.innerHTML = '<span style="color:var(--text3);font-size:12px">No staff records.</span>';
+      return;
+    }
+    var html = '';
+    _GFR_STAFF_CACHE.forEach(function(s){
+      html += '<label>'
+            + '<input type="checkbox" data-gfr-form="' + p + '" data-gfr-staff="' + _gfrEsc(s.email) + '">'
+            + '<span>' + _gfrEsc(s.name || s.email) + '</span></label>';
+    });
+    box.innerHTML = html;
+  }catch(e){
+    box.innerHTML = '<span style="color:#ef4444;font-size:12px">Failed to load staff.</span>';
+  }
+}
+// _gfrCollectExtras returns {equipment_needed: [field, ...], staff_attending: 'a@x.com, b@x.com'}.
+function _gfrCollectExtras(p){
+  var equipment = [];
+  document.querySelectorAll('[data-gfr-form="' + p + '"][data-gfr-eq]').forEach(function(el){
+    if(el.checked) equipment.push(el.getAttribute('data-gfr-eq'));
+  });
+  var staff = [];
+  document.querySelectorAll('[data-gfr-form="' + p + '"][data-gfr-staff]').forEach(function(el){
+    if(el.checked) staff.push(el.getAttribute('data-gfr-staff'));
+  });
+  return { equipment_needed: equipment, staff_attending: staff.join(', ') };
+}
+// Reset extras checkboxes + reload staff list. Called from each form's reset().
+function _gfrResetExtras(p){
+  document.querySelectorAll('[data-gfr-form="' + p + '"][data-gfr-eq]').forEach(function(el){
+    el.checked = false;
+  });
+  _gfrLoadStaff(p);
+}
+
 // -- openGFRForm (replaces Stage 2 stub, handles all 4 completed forms) ---
 function openGFRForm(ft){
   closeGFRChooser();
   if(ft==='Business Outreach Log'){bolReset();restoreDraft('bol');document.getElementById('gfr-form-bol').classList.add('open');}
-  else if(ft==='Mobile Massage Service'){s3Reset();restoreDraft('s3');document.getElementById('gfr-form-s3').classList.add('open');}
-  else if(ft==='Lunch and Learn'){s4Reset();restoreDraft('s4');document.getElementById('gfr-form-s4').classList.add('open');}
-  else if(ft==='Health Assessment Screening'){s5Reset();restoreDraft('s5');document.getElementById('gfr-form-s5').classList.add('open');}
-  else if(ft==='External Event'){s2Reset();restoreDraft('s2');document.getElementById('gfr-form-s2').classList.add('open');}
+  else if(ft==='Mobile Massage Service'){s3Reset();restoreDraft('s3');document.getElementById('gfr-form-s3').classList.add('open');_gfrResetExtras('s3');}
+  else if(ft==='Lunch and Learn'){s4Reset();restoreDraft('s4');document.getElementById('gfr-form-s4').classList.add('open');_gfrResetExtras('s4');}
+  else if(ft==='Health Assessment Screening'){s5Reset();restoreDraft('s5');document.getElementById('gfr-form-s5').classList.add('open');_gfrResetExtras('s5');}
+  else if(ft==='External Event'){
+    s2Reset();restoreDraft('s2');
+    _gfrResetExtras('s2');
+    var s2 = document.getElementById('gfr-form-s2');
+    // Event-only mode (entered via /events FAB): hide check-in/interaction
+    // sections, force-show the event block, change the modal title.
+    if(_gfrEventOnly){
+      s2.classList.add('s2-event-only');
+      var cb = document.getElementById('s2-has-event');
+      if(cb){ cb.checked = true; }
+      var blk = document.getElementById('s2-event-block');
+      if(blk){ blk.style.display = ''; }
+      var ttl = s2.querySelector('.gfr-hdr-title');
+      if(ttl){ ttl.textContent = 'Schedule Event'; }
+    } else {
+      s2.classList.remove('s2-event-only');
+      var ttl2 = s2.querySelector('.gfr-hdr-title');
+      if(ttl2){ ttl2.textContent = 'Log Interaction'; }
+    }
+    s2.classList.add('open');
+  }
 }
 
 // -- Form 3: Mobile Massage Service ----------------------------------------
@@ -931,6 +1069,7 @@ async function s3Submit(){
     audience_type:audience,anticipated_count:count,company_industry:industry,products_services:products,
     massage_duration:mdur,massage_type:mtype,requested_datetime:dt
   };
+  Object.assign(fields, _gfrCollectExtras('s3'));
   await _gfrDoSubmit('s3','Mobile Massage Service',fields,btn);
 }
 
@@ -969,6 +1108,7 @@ async function s4Submit(){
     anticipated_count:count,dietary_restrictions:diets,staff_collar:collar,healthcare_insurance:hcare,
     company_industry:industry,products_services:products,requested_datetime:dt
   };
+  Object.assign(fields, _gfrCollectExtras('s4'));
   await _gfrDoSubmit('s4','Lunch and Learn',fields,btn);
 }
 
@@ -1002,6 +1142,7 @@ async function s5Submit(){
     anticipated_count:count,staff_collar:collar,healthcare_insurance:hcare,
     company_industry:industry,products_services:products,requested_datetime:dt
   };
+  Object.assign(fields, _gfrCollectExtras('s5'));
   await _gfrDoSubmit('s5','Health Assessment Screening',fields,btn);
 }
 
@@ -1174,15 +1315,18 @@ function s2Reset(){
 }
 async function s2Submit(){
   var btn=document.getElementById('s2-submit');
-  // Interaction details — always required
+  // Event-only mode (entered via /events FAB): the Interaction Details
+  // section is hidden, so skip validation and use empty/default values.
+  var eventOnly = document.getElementById('gfr-form-s2').classList.contains('s2-event-only');
+  // Interaction details — required only in dual-mode (not event-only).
   var intType=document.getElementById('s2-int-type').value;
   var intOutcome=document.getElementById('s2-int-outcome').value;
   var intPerson=document.getElementById('s2-int-person').value.trim();
   var intFu=document.getElementById('s2-int-fu').value;
   var intSummary=document.getElementById('s2-int-summary').value.trim();
-  if(!intSummary){alert('Please describe the interaction in the "What happened?" field.');return;}
+  if(!eventOnly && !intSummary){alert('Please describe the interaction in the "What happened?" field.');return;}
 
-  var hasEvent=document.getElementById('s2-has-event').checked;
+  var hasEvent = eventOnly ? true : document.getElementById('s2-has-event').checked;
 
   // Build fields based on whether this is event-or-interaction-only
   var fields={
@@ -1236,6 +1380,7 @@ async function s2Submit(){
     fields.venue_address=addr;fields.indoor_outdoor=inout;fields.has_electricity=elec;
     fields.staff_collar=collar;fields.healthcare_insurance=hcare;fields.company_industry=industry;
     fields.event_datetime=dt;fields.event_status=status;
+    Object.assign(fields, _gfrCollectExtras('s2'));
   }
 
   btn.disabled=true;btn.textContent='Submitting\u2026';

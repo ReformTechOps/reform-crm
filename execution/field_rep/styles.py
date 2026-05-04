@@ -185,5 +185,29 @@ V3_CSS = """
 .mobile-hdr-brand { display:flex; align-items:center; padding-right:10px;
                     flex-shrink:0 }
 .mobile-hdr-brand img { height:18px; width:auto; display:block }
+
+/* ── Expandable stops list inside My Routes cards ───────────────── */
+.route-stops-toggle { background:none; border:none; padding:6px 0;
+                      margin-top:8px; color:#004ac6; font-size:12px;
+                      font-weight:600; cursor:pointer; font-family:inherit;
+                      display:inline-flex; align-items:center; gap:4px }
+.route-stops-toggle:active { color:#003ba0 }
+.route-stops-caret { display:inline-block; line-height:1 }
+.route-stops-list { margin-top:6px; border-top:1px solid var(--border);
+                    padding-top:8px }
+.route-stop-row { display:flex; align-items:center; gap:10px;
+                  padding:8px 0; border-bottom:1px solid var(--border);
+                  font-size:13px }
+.route-stop-row:last-child { border-bottom:none }
+.route-stop-num { width:22px; height:22px; border-radius:50%;
+                  color:#fff; font-size:11px; font-weight:700;
+                  display:flex; align-items:center; justify-content:center;
+                  flex-shrink:0 }
+.route-stop-name { flex:1; min-width:0; white-space:nowrap;
+                   overflow:hidden; text-overflow:ellipsis;
+                   color:#004ac6; text-decoration:none; font-weight:500 }
+.route-stop-name:active { color:#003ba0 }
+.route-stop-name--plain { color:var(--text); cursor:default }
+.route-stop-status { font-size:11px; font-weight:600; flex-shrink:0 }
 </style>
 """

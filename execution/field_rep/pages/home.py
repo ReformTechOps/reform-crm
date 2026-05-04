@@ -1049,9 +1049,9 @@ async function load() {{
     + '<div class="kpi-card">'
     + '<div class="kpi-label">Complete</div>'
     + '<div class="kpi-val" style="color:' + pctColor + '">' + pct + '%</div></div>'
-    + '<div class="kpi-card">'
+    + '<a class="kpi-card" href="/todo">'
     + '<div class="kpi-label">Missed</div>'
-    + '<div class="kpi-val ' + (missedTotal > 0 ? 'bad' : 'ok') + '">' + missedTotal + '</div></div>';
+    + '<div class="kpi-val ' + (missedTotal > 0 ? 'bad' : 'ok') + '">' + missedTotal + '</div></a>';
 
   // Split into upcoming vs past
   var upcoming = routes.filter(function(r) {{
@@ -1080,7 +1080,13 @@ async function load() {{
     var total = myStops.length;
     var rpct = total ? Math.round(v/total*100) : 0;
 
-    var h = '<a href="/routes/'+rid+'" class="card-soft" style="margin-bottom:10px">';
+    // Card wrapper is a <div> so we can put two interactive zones inside:
+    // (a) the title row links to /routes/{id} (full map), (b) "Show stops"
+    // button toggles an inline stop list with each stop linking to its
+    // /company/{id} detail page.
+    var h = '<div class="card-soft" style="margin-bottom:10px">';
+    // ── Header row: title links to map ───────────────────────────────
+    h += '<a href="/routes/'+rid+'" style="text-decoration:none;color:inherit;display:block">';
     h += '<div class="card-row" style="margin-bottom:6px">';
     h += '<div class="card-soft-title">'+esc(row['Name']||'(unnamed)')+'</div>';
     h += '<span class="pill" style="background:'+sc+'20;color:'+sc+'">'+esc(status)+'</span>';
@@ -1099,6 +1105,34 @@ async function load() {{
       h += '<div style="height:100%;width:'+rpct+'%;background:#059669;border-radius:2px"></div></div>';
     }}
     h += '</a>';
+    // ── Inline stops toggle (below the linked card body) ─────────────
+    if(total) {{
+      h += '<button type="button" class="route-stops-toggle" '
+        + 'onclick="toggleRouteStops(event,'+rid+')" '
+        + 'data-rid="'+rid+'" aria-expanded="false">'
+        + 'Show stops <span class="route-stops-caret">▾</span></button>';
+      h += '<div class="route-stops-list" id="rs-'+rid+'" style="display:none">';
+      myStops.forEach(function(s, i) {{
+        var ss = sv(s['Status'])||'Pending';
+        var sCol = ss==='Visited'?'#059669':ss==='Skipped'?'#f97316':ss==='Not Reached'?'#ef4444':ss==='In Progress'?'#a855f7':'#94a3b8';
+        var venueLink = s['Venue'] || [];
+        var vId = (venueLink.length && (venueLink[0].id != null)) ? venueLink[0].id : null;
+        var vName = (vId && venueMap[vId] && venueMap[vId]['Name'])
+                  || (venueLink.length && venueLink[0].value)
+                  || s['Name'] || '(unknown)';
+        var coId = vId ? venueCoMap[vId] : null;
+        var nameHtml = coId
+          ? '<a href="/company/'+coId+'" class="route-stop-name">'+esc(vName)+'</a>'
+          : '<span class="route-stop-name route-stop-name--plain">'+esc(vName)+'</span>';
+        h += '<div class="route-stop-row">'
+          +    '<span class="route-stop-num" style="background:'+sCol+'">'+(i+1)+'</span>'
+          +    nameHtml
+          +    '<span class="route-stop-status" style="color:'+sCol+'">'+esc(ss)+'</span>'
+          +  '</div>';
+      }});
+      h += '</div>';
+    }}
+    h += '</div>';
     return h;
   }}
 
@@ -1127,6 +1161,18 @@ function togglePast() {{
     el.style.display = 'none';
     btn.innerHTML = '▶ Show past routes';
   }}
+}}
+
+function toggleRouteStops(evt, rid) {{
+  if (evt) {{ evt.preventDefault(); evt.stopPropagation(); }}
+  var list = document.getElementById('rs-' + rid);
+  var btn = document.querySelector('.route-stops-toggle[data-rid="' + rid + '"]');
+  if (!list || !btn) return;
+  var open = list.style.display !== 'none';
+  list.style.display = open ? 'none' : 'block';
+  btn.setAttribute('aria-expanded', open ? 'false' : 'true');
+  btn.innerHTML = (open ? 'Show stops ' : 'Hide stops ')
+    + '<span class="route-stops-caret">' + (open ? '▾' : '▴') + '</span>';
 }}
 
 load();

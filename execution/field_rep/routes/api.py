@@ -23,7 +23,7 @@ from hub import guerilla_api
 from hub.access import _is_admin
 from hub.constants import (
     T_EVENTS, T_GOR_ACTS, T_GOR_BOXES, T_GOR_ROUTES, T_GOR_ROUTE_STOPS,
-    T_GOR_VENUES, T_LEADS,
+    T_GOR_VENUES, T_LEADS, T_STAFF,
     T_CONSENT_FORMS, T_CONSENT_SUBMISSIONS,
 )
 
@@ -520,6 +520,28 @@ async def update_route_stop(request: Request, stop_id: int):
     resp = await guerilla_api.update_route_stop(request, br, bt, session, stop_id)
     await _invalidate(T_GOR_ROUTE_STOPS)
     return resp
+
+
+@router.get("/api/staff")
+async def list_active_staff(request: Request):
+    """Return active staff (Name + Email) for the GFR event-form pickers.
+    Cached via _cached_rows so repeated form opens don't hammer Baserow."""
+    session = await get_session(request)
+    if not session:
+        return JSONResponse({"error": "unauthenticated"}, status_code=401)
+    if not T_STAFF:
+        return JSONResponse({"staff": []})
+    rows = await _cached_rows(T_STAFF)
+    out = []
+    for r in rows or []:
+        if r.get("Active") is False:
+            continue
+        email = (r.get("Email") or "").strip()
+        name = (r.get("Name") or email).strip()
+        if email:
+            out.append({"name": name, "email": email})
+    out.sort(key=lambda s: (s["name"] or s["email"]).lower())
+    return JSONResponse({"staff": out})
 
 
 @router.get("/api/guerilla/active-stop")
