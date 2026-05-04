@@ -211,8 +211,13 @@ def _kiosk_run_page(br: str, bt: str, kiosk_id: str) -> str:
     <input id="kl-phone" type="tel" inputmode="tel" autocomplete="tel" required>
     <label>Email</label>
     <input id="kl-email" type="email" inputmode="email" autocomplete="email">
-    <label>What can we help with?</label>
-    <input id="kl-reason" type="text" placeholder="Massage, back pain, free chair massage, etc.">
+    <label>What can we help with? *</label>
+    <select id="kl-service" required>
+      <option value="">— Select a service —</option>
+    </select>
+    <p class="kiosk-help" id="kl-service-hint" style="margin-top:6px;font-size:13px">
+      You'll be asked to read &amp; sign the consent for this service in the next step.
+    </p>
     <label>Anything else?</label>
     <textarea id="kl-notes" rows="2"></textarea>
     <button id="kl-submit" class="kiosk-btn-primary" onclick="submitKioskLead()">Continue &rarr;</button>
@@ -247,35 +252,46 @@ def _kiosk_run_page(br: str, bt: str, kiosk_id: str) -> str:
 """
 
     css_extra = """
-html, body { margin:0; padding:0; background:#0f172a; min-height:100vh; -webkit-text-size-adjust:100%; }
+/* Light-mode kiosk shell — daytime visibility for tablets handed to leads. */
+html, body { margin:0; padding:0; background:#f8fafc; min-height:100vh; -webkit-text-size-adjust:100%; }
 * { box-sizing:border-box; }
 .kiosk-frame {
   min-height:100vh; max-width:720px; margin:0 auto; padding:0 0 24px;
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
-  color:#e5e7eb;
+  color:#0f172a;
 }
 .kiosk-topbar {
   display:flex; align-items:center; gap:12px; padding:14px 18px;
-  background:#1e293b; border-bottom:1px solid #334155; position:sticky; top:0; z-index:5;
+  background:#fff; border-bottom:1px solid #e5e7eb; position:sticky; top:0; z-index:5;
+  box-shadow:0 1px 2px rgba(15,23,42,.04);
 }
-.kiosk-event { flex:1; font-size:15px; font-weight:700; color:#fff; min-width:0;
+.kiosk-event { flex:1; font-size:15px; font-weight:700; color:#0f172a; min-width:0;
   overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .kiosk-exit {
-  background:transparent; color:#94a3b8; border:1px solid #475569; border-radius:6px;
+  background:transparent; color:#64748b; border:1px solid #cbd5e1; border-radius:6px;
   padding:6px 10px; font-size:12px; cursor:pointer; font-family:inherit;
 }
 .kiosk-step { padding:20px 18px; }
-.kiosk-step h2 { font-size:22px; margin:0 0 10px; color:#fff; }
-.kiosk-help { font-size:14px; color:#94a3b8; margin:0 0 18px; line-height:1.5; }
+.kiosk-step h2 { font-size:22px; margin:0 0 10px; color:#0f172a; }
+.kiosk-help { font-size:14px; color:#64748b; margin:0 0 18px; line-height:1.5; }
 .kiosk-step label {
   display:block; font-size:12px; font-weight:700; text-transform:uppercase;
-  letter-spacing:.5px; color:#94a3b8; margin:14px 0 6px;
+  letter-spacing:.5px; color:#64748b; margin:14px 0 6px;
 }
-.kiosk-step input, .kiosk-step textarea {
-  width:100%; padding:14px 16px; background:#1e293b; border:1px solid #334155;
-  color:#fff; border-radius:10px; font-size:18px; font-family:inherit; outline:none;
+.kiosk-step input, .kiosk-step textarea, .kiosk-step select {
+  width:100%; padding:14px 16px; background:#fff; border:1px solid #cbd5e1;
+  color:#0f172a; border-radius:10px; font-size:18px; font-family:inherit; outline:none;
+  appearance:none; -webkit-appearance:none;
 }
-.kiosk-step input:focus, .kiosk-step textarea:focus { border-color:#ea580c; }
+.kiosk-step select {
+  /* Built-in caret since we cleared appearance for visual parity with inputs. */
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20'><path d='M5 8l5 5 5-5' stroke='%2364748b' stroke-width='2' fill='none' stroke-linecap='round' stroke-linejoin='round'/></svg>");
+  background-repeat:no-repeat; background-position:right 14px center; background-size:18px 18px;
+  padding-right:42px; cursor:pointer;
+}
+.kiosk-step input:focus, .kiosk-step textarea:focus, .kiosk-step select:focus {
+  border-color:#ea580c; box-shadow:0 0 0 3px rgba(234,88,12,.15);
+}
 .kiosk-step textarea { resize:vertical; min-height:60px; }
 .kiosk-btn-primary {
   width:100%; margin-top:24px; background:#ea580c; color:#fff; border:none;
@@ -284,21 +300,21 @@ html, body { margin:0; padding:0; background:#0f172a; min-height:100vh; -webkit-
 }
 .kiosk-btn-primary:disabled { opacity:.5; cursor:not-allowed; }
 .kiosk-btn-secondary {
-  background:transparent; color:#cbd5e1; border:1px solid #475569; border-radius:10px;
+  background:#fff; color:#334155; border:1px solid #cbd5e1; border-radius:10px;
   padding:14px 18px; font-size:15px; font-weight:600; cursor:pointer; font-family:inherit;
 }
 .kiosk-msg { margin-top:12px; font-size:14px; min-height:18px; text-align:center; }
 .kiosk-consent-body {
-  background:#1e293b; border:1px solid #334155; border-radius:10px;
+  background:#fff; border:1px solid #e5e7eb; border-radius:10px;
   padding:16px 18px; max-height:50vh; overflow-y:auto; font-size:15px;
-  line-height:1.55; color:#e5e7eb; margin-bottom:18px; white-space:pre-wrap;
+  line-height:1.55; color:#0f172a; margin-bottom:18px; white-space:pre-wrap;
   -webkit-overflow-scrolling:touch;
 }
 .kiosk-consent-body h1, .kiosk-consent-body h2, .kiosk-consent-body h3 {
-  margin-top:0; color:#fff;
+  margin-top:0; color:#0f172a;
 }
 .kiosk-sig-wrap {
-  background:#fff; border:2px solid #334155; border-radius:10px;
+  background:#fff; border:2px solid #cbd5e1; border-radius:10px;
   height:160px; touch-action:none; position:relative; margin-top:8px;
 }
 .kiosk-sig-wrap canvas { width:100%; height:100%; display:block; cursor:crosshair; }
@@ -314,17 +330,18 @@ html, body { margin:0; padding:0; background:#0f172a; min-height:100vh; -webkit-
   font-size:42px; margin-bottom:18px; font-weight:700;
 }
 .kiosk-modal-bg {
-  position:fixed; inset:0; background:rgba(0,0,0,.7); display:flex;
+  position:fixed; inset:0; background:rgba(15,23,42,.55); display:flex;
   align-items:center; justify-content:center; padding:20px; z-index:50;
 }
 .kiosk-modal {
-  background:#1e293b; border:1px solid #334155; border-radius:14px;
+  background:#fff; border:1px solid #e5e7eb; border-radius:14px;
   padding:24px; width:100%; max-width:360px;
+  box-shadow:0 10px 30px rgba(15,23,42,.18);
 }
-.kiosk-modal h3 { margin:0 0 14px; color:#fff; font-size:18px; }
+.kiosk-modal h3 { margin:0 0 14px; color:#0f172a; font-size:18px; }
 .kiosk-modal input {
-  width:100%; padding:14px; background:#0f172a; border:1px solid #475569;
-  color:#fff; border-radius:8px; font-size:24px; text-align:center;
+  width:100%; padding:14px; background:#f8fafc; border:1px solid #cbd5e1;
+  color:#0f172a; border-radius:8px; font-size:24px; text-align:center;
   letter-spacing:8px; font-family:monospace; outline:none;
 }
 .kiosk-modal-actions {
@@ -364,16 +381,43 @@ async function loadKiosk() {{
     var data = await r.json();
     document.getElementById('ks-event-name').textContent = data.event_name || 'Reform Chiropractic';
     _consentForms = data.consent_forms || [];
+    populateServiceDropdown();
     resetForm();
   }} catch (e) {{
     document.getElementById('ks-event-name').textContent = 'Connection error';
   }}
 }}
 
+// Populate the service dropdown from the rep-selected consent forms. Each
+// option is an INDEX into _consentForms so selection drives which consent
+// form gets shown next. If the rep selected zero consents we hide the
+// dropdown entirely and let leads continue without a consent step.
+function populateServiceDropdown() {{
+  var sel = document.getElementById('kl-service');
+  var hint = document.getElementById('kl-service-hint');
+  if (!sel) return;
+  if (!_consentForms.length) {{
+    // No consents configured for this kiosk session — hide the picker and
+    // let the submit go straight to "done".
+    var lbl = sel.previousElementSibling;
+    sel.style.display = 'none';
+    if (lbl && lbl.tagName === 'LABEL') lbl.style.display = 'none';
+    if (hint) hint.style.display = 'none';
+    return;
+  }}
+  var opts = ['<option value="">— Select a service —</option>'];
+  _consentForms.forEach(function(f, i) {{
+    opts.push('<option value="' + i + '">' + esc(f.name) + '</option>');
+  }});
+  sel.innerHTML = opts.join('');
+}}
+
 function resetForm() {{
-  ['kl-name','kl-phone','kl-email','kl-reason','kl-notes'].forEach(function(id) {{
+  ['kl-name','kl-phone','kl-email','kl-notes'].forEach(function(id) {{
     var el = document.getElementById(id); if (el) el.value = '';
   }});
+  var sel = document.getElementById('kl-service');
+  if (sel) sel.value = '';
   _capturedLeadId = null;
   _currentIdx = 0;
   document.getElementById('kl-msg').textContent = '';
@@ -392,6 +436,20 @@ async function submitKioskLead() {{
     msg.style.color = '#ef4444'; msg.textContent = 'Name and phone are required.';
     return;
   }}
+  // Service dropdown — required when consent forms were configured at setup.
+  var serviceIdx = -1;
+  if (_consentForms.length) {{
+    var sel = document.getElementById('kl-service');
+    var sv = (sel && sel.value !== '') ? parseInt(sel.value, 10) : -1;
+    if (!(sv >= 0 && sv < _consentForms.length)) {{
+      msg.style.color = '#ef4444'; msg.textContent = 'Please pick a service.';
+      return;
+    }}
+    serviceIdx = sv;
+  }}
+  // The lead's "reason" goes to T_LEADS — when a service was picked use the
+  // consent's display name so back-office sees what they came in for.
+  var reason = serviceIdx >= 0 ? _consentForms[serviceIdx].name : '';
   btn.disabled = true; btn.textContent = 'Saving…';
   try {{
     var r = await fetch('/api/kiosk/' + encodeURIComponent(KIOSK_ID) + '/lead', {{
@@ -399,7 +457,7 @@ async function submitKioskLead() {{
       headers: {{ 'Content-Type': 'application/json' }},
       body: JSON.stringify({{
         name: name, phone: phone, email: email,
-        reason: get('kl-reason'), notes: get('kl-notes'),
+        reason: reason, notes: get('kl-notes'),
       }}),
     }});
     var data = await r.json().catch(function(){{return{{}};}});
@@ -410,10 +468,11 @@ async function submitKioskLead() {{
       return;
     }}
     _capturedLeadId = data.row && data.row.id;
-    if (!_consentForms.length) {{
+    // Service-driven flow: only the consent for the picked service is shown.
+    if (serviceIdx < 0) {{
       finishKiosk();
     }} else {{
-      _currentIdx = 0;
+      _currentIdx = serviceIdx;
       renderConsent();
     }}
   }} catch (e) {{
@@ -427,10 +486,13 @@ function renderConsent() {{
   var form = _consentForms[_currentIdx];
   if (!form) {{ finishKiosk(); return; }}
   var box = document.getElementById('ks-step-consent');
-  var stepStr = '(' + (_currentIdx + 1) + ' of ' + _consentForms.length + ')';
+  var bodyText = (form.body && form.body.trim())
+    ? form.body
+    : 'No consent text on file. Please ask a Reform Chiropractic staff member before signing.';
   box.innerHTML =
-    '<h2>' + esc(form.name) + ' <span style="font-size:14px;color:#94a3b8;font-weight:400">' + esc(stepStr) + '</span></h2>'
-    + '<div class="kiosk-consent-body">' + esc(form.body) + '</div>'
+    '<h2>' + esc(form.name) + '</h2>'
+    + '<p class="kiosk-help">Please read the form below. Type your name and sign to confirm.</p>'
+    + '<div class="kiosk-consent-body">' + esc(bodyText) + '</div>'
     + '<label>Type your full name to sign</label>'
     + '<input id="kc-name" type="text" placeholder="Your full legal name" autocomplete="name">'
     + '<label>Sign below</label>'
@@ -511,12 +573,9 @@ async function submitConsent() {{
       btn.disabled = false; btn.textContent = 'I agree & sign';
       return;
     }}
-    _currentIdx += 1;
-    if (_currentIdx >= _consentForms.length) {{
-      finishKiosk();
-    }} else {{
-      renderConsent();
-    }}
+    // Single-consent flow: lead signs the form for the service they picked,
+    // then we're done. No multi-step walkthrough.
+    finishKiosk();
   }} catch (e) {{
     msg.style.color = '#ef4444';
     msg.textContent = 'Network error.';
