@@ -398,8 +398,11 @@ async def guerilla_log(request: Request, br: str, bt: str, user: dict,
     event_id = None
     if T_EVENTS and is_event:
         slug = hashlib.sha256(f"{form_type}-{today}-{secrets.token_urlsafe(8)}".encode()).hexdigest()[:12]
+        # `today` is ISO YYYY-MM-DD (used for the Event Date column). The
+        # auto-generated display Name uses US MM-DD-YYYY for readability.
+        today_us = today[5:7] + "-" + today[8:10] + "-" + today[0:4] if len(today) >= 10 else today
         ev_fields = {
-            "Name": fields.get("event_name") or fields.get("company") or f"{form_type} - {today}",
+            "Name": fields.get("event_name") or fields.get("company") or f"{form_type} - {today_us}",
             "Event Type": form_type,
             "Event Date": fields.get("event_date") or today,
             "Form Slug": slug,

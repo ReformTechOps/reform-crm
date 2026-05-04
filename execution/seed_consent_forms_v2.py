@@ -57,6 +57,39 @@ By signing below I acknowledge I have read and understood this form, and I
 voluntarily consent to massage therapy."""
 
 
+CHIRO_ADJUSTMENT_BODY = """INFORMED CONSENT FOR CHIROPRACTIC ADJUSTMENT
+
+I, the undersigned, request and consent to receive chiropractic adjustment
+and related care from a licensed chiropractor at Reform Chiropractic.
+
+I understand that chiropractic care includes hands-on spinal manipulation,
+joint mobilization, soft-tissue therapy, and similar techniques used to
+restore joint motion and relieve pain.
+
+I have been informed that, as with any health-care procedure, there are
+certain risks. These risks include, but are not limited to:
+- Temporary soreness, stiffness, or mild bruising near the area treated
+- Aggravation of an existing condition
+- Rare risk of disc injury, rib injury, or strain to nearby tissue
+- Very rare risk of stroke associated with cervical (neck) manipulation
+
+These outcomes are uncommon, and the chiropractor will adjust technique to
+my comfort. I may stop the adjustment at any time.
+
+I confirm that I have:
+- Disclosed all current and past medical conditions, medications, prior
+  surgeries, recent injuries, and any pregnancy status
+- Had the chance to ask questions about the proposed care plan
+- Been informed that other treatment options exist, including medical care,
+  physical therapy, and choosing not to receive treatment
+
+I confirm I am 18 or older, or that a parent/legal guardian is signing on
+behalf of a minor.
+
+By signing below I acknowledge I have read and understood this form, and I
+voluntarily consent to chiropractic adjustment and related care."""
+
+
 CHIRO_CONSULT_BODY = """CONSENT TO CHIROPRACTIC CONSULTATION
 
 I authorize Reform Chiropractic and its licensed providers to perform an
@@ -129,6 +162,13 @@ FORMS = [
         "Slug":         "massage_v1",
         "Display Name": "Massage Therapy Consent",
         "Body":         MASSAGE_BODY,
+        "Version":      "v1",
+        "Active":       True,
+    },
+    {
+        "Slug":         "adjustment_v1",
+        "Display Name": "Chiropractic Adjustment Consent",
+        "Body":         CHIRO_ADJUSTMENT_BODY,
         "Version":      "v1",
         "Active":       True,
     },

@@ -212,12 +212,15 @@ def _kiosk_run_page(br: str, bt: str, kiosk_id: str) -> str:
     <label>Email</label>
     <input id="kl-email" type="email" inputmode="email" autocomplete="email">
     <label>What can we help with? *</label>
-    <select id="kl-service" required>
+    <select id="kl-service" required onchange="onServiceChange()">
       <option value="">— Select a service —</option>
     </select>
     <p class="kiosk-help" id="kl-service-hint" style="margin-top:6px;font-size:13px">
-      You'll be asked to read &amp; sign the consent for this service in the next step.
+      Pick a service to preview the consent form below. You'll sign it in
+      the next step.
     </p>
+    <!-- Consent preview pane — populated when the dropdown changes. -->
+    <div id="kl-consent-preview" class="kiosk-consent-body" style="display:none;margin-top:8px;margin-bottom:0"></div>
     <label>Anything else?</label>
     <textarea id="kl-notes" rows="2"></textarea>
     <button id="kl-submit" class="kiosk-btn-primary" onclick="submitKioskLead()">Continue &rarr;</button>
@@ -368,6 +371,35 @@ function showStep(name) {{
   }});
 }}
 
+// Reformat any ISO YYYY-MM-DD substrings inside a free-text string to
+// MM-DD-YYYY. Auto-generated event names look like "Lunch and Learn -
+// 2026-05-04"; this turns that into "Lunch and Learn - 05-04-2026".
+function fmtUSDates(s) {{
+  return String(s == null ? '' : s).replace(
+    /(\\d{{4}})-(\\d{{2}})-(\\d{{2}})/g,
+    function(_, y, m, d) {{ return m + '-' + d + '-' + y; }}
+  );
+}}
+
+// Render the picked service's consent body inline on the lead-capture step
+// so the lead can read it before pressing Continue.
+function onServiceChange() {{
+  var sel = document.getElementById('kl-service');
+  var box = document.getElementById('kl-consent-preview');
+  if (!sel || !box) return;
+  var idx = sel.value === '' ? -1 : parseInt(sel.value, 10);
+  if (idx < 0 || idx >= _consentForms.length) {{
+    box.style.display = 'none'; box.innerHTML = '';
+    return;
+  }}
+  var form = _consentForms[idx];
+  var body = (form.body && form.body.trim())
+    ? form.body
+    : 'No consent text on file. Please ask a Reform Chiropractic staff member before signing.';
+  box.innerHTML = esc(body);
+  box.style.display = '';
+}}
+
 async function loadKiosk() {{
   try {{
     var r = await fetch('/api/kiosk/' + encodeURIComponent(KIOSK_ID));
@@ -379,7 +411,8 @@ async function loadKiosk() {{
       return;
     }}
     var data = await r.json();
-    document.getElementById('ks-event-name').textContent = data.event_name || 'Reform Chiropractic';
+    document.getElementById('ks-event-name').textContent =
+      fmtUSDates(data.event_name) || 'Reform Chiropractic';
     _consentForms = data.consent_forms || [];
     populateServiceDropdown();
     resetForm();
@@ -418,6 +451,8 @@ function resetForm() {{
   }});
   var sel = document.getElementById('kl-service');
   if (sel) sel.value = '';
+  var preview = document.getElementById('kl-consent-preview');
+  if (preview) {{ preview.style.display = 'none'; preview.innerHTML = ''; }}
   _capturedLeadId = null;
   _currentIdx = 0;
   document.getElementById('kl-msg').textContent = '';

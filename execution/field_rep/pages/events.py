@@ -136,6 +136,15 @@ function svJS(v) {{
   return String(v);
 }}
 
+// Reformat any ISO YYYY-MM-DD substrings to MM-DD-YYYY. Auto-generated event
+// names embed an ISO date; we surface them as "Lunch and Learn - 05-04-2026".
+function _fmtUSDates(s) {{
+  return String(s == null ? '' : s).replace(
+    /(\\d{{4}})-(\\d{{2}})-(\\d{{2}})/g,
+    function(_, y, m, d) {{ return m + '-' + d + '-' + y; }}
+  );
+}}
+
 // ── Date helpers ─────────────────────────────────────────────────────
 function _dateKey(d) {{
   // Local-time YYYY-MM-DD; avoids the UTC drift you get from toISOString()
@@ -314,7 +323,7 @@ function renderEvents() {{
   }}
   var today = _todayKey();
   box.innerHTML = rows.map(function(e) {{
-    var nm = e['Name'] || '(unnamed)';
+    var nm = _fmtUSDates(e['Name'] || '(unnamed)');
     var et = svJS(e['Event Type']);
     var es = svJS(e['Event Status']) || 'Prospective';
     var dt = e['Event Date'] || '';
@@ -368,7 +377,7 @@ function openEventModal(id) {{
   var ev = _events.find(function(e){{return e.id === id;}});
   if (!ev) return;
   _currentEventId = id;
-  var title = ev['Name'] || '(unnamed)';
+  var title = _fmtUSDates(ev['Name'] || '(unnamed)');
   document.getElementById('evt-modal-title').textContent = title;
   var body = document.getElementById('evt-modal-body');
   var et = svJS(ev['Event Type']);
@@ -395,7 +404,7 @@ function openEventModal(id) {{
          + '<div style="font-size:14px;color:var(--text)">'+esc(val)+'</div></div>';
   }}
   html += row('Type', et);
-  html += row('Date', dt);
+  html += row('Date', _fmtUSDates(dt));
   html += row('Business', biz);
   html += row('Organizer', org + (oph ? ' · ' + oph : ''));
   html += row('Venue Address', addr);

@@ -475,9 +475,13 @@ function hmRenderEventsStrip(upcoming) {
   const sorted = upcoming.slice()
     .sort((a, b) => (a['Event Date'] || '').localeCompare(b['Event Date'] || ''))
     .slice(0, 6);
+  // Auto-generated event names embed an ISO date ("Lunch and Learn -
+  // 2026-05-04"). Rewrite any YYYY-MM-DD substring to MM-DD-YYYY.
+  const _fmtUSDates = s => String(s == null ? '' : s).replace(
+    /(\d{4})-(\d{2})-(\d{2})/g, (_, y, m, d) => m + '-' + d + '-' + y);
   rail.innerHTML = sorted.map(e => {
     const when  = _hmRelDate(e['Event Date']);
-    const name  = esc(sv(e['Name']) || 'Event');
+    const name  = esc(_fmtUSDates(sv(e['Name']) || 'Event'));
     // Business is a link_row → array of {id, value, name}. Join multiple
     // linked businesses with a comma. Falls back to '' if none linked.
     const bizRaw = Array.isArray(e['Business'])
