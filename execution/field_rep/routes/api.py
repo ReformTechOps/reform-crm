@@ -151,7 +151,7 @@ _EVENT_STATUSES = {
 }
 _EVENT_PATCH_ALLOWLIST = {
     "Event Status", "Checked In", "Decision Notes",
-    "Anticipated Count", "Notes", "Staff Attending",
+    "Anticipated Count", "Notes", "Staff Attending", "Venue Address",
     # Equipment booleans (existing + B5 additions)
     "Generator Needed", "Table Needed", "EZ Up Needed",
     "Massage Chair Needed", "Massage Table Needed",

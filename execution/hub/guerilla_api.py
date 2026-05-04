@@ -426,8 +426,15 @@ async def guerilla_log(request: Request, br: str, bt: str, user: dict,
                 ev_fields["Flyer URL"] = flyer_url
         else:
             ev_fields["Event Status"] = "Scheduled"
-        if fields.get("address") or fields.get("event_address"):
-            ev_fields["Venue Address"] = fields.get("address") or fields.get("event_address")
+        # Forms submit `venue_address`; older callers may use `address` /
+        # `event_address`. Accept any of them.
+        addr = (
+            fields.get("venue_address")
+            or fields.get("address")
+            or fields.get("event_address")
+        )
+        if addr:
+            ev_fields["Venue Address"] = addr
         if fields.get("anticipated_count"):
             try:
                 ev_fields["Anticipated Count"] = int(fields["anticipated_count"])

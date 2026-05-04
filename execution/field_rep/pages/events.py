@@ -429,6 +429,13 @@ function openEventModal(id) {{
          + 'style="width:18px;height:18px;accent-color:#004ac6">'
          + '<label for="evt-edit-checkedin" style="font-size:14px;color:var(--text);cursor:pointer">Checked In</label>'
          + '</div>';
+    // Venue Address (editable so admins can backfill rows created before
+    // the form->T_EVENTS plumbing wrote venue_address through).
+    html += '<div style="margin-bottom:10px">'
+         + '<label style="font-size:11px;font-weight:600;color:var(--text3);display:block;margin-bottom:4px">Venue Address</label>'
+         + '<input id="evt-edit-addr" type="text" value="'+esc(addr)+'" placeholder="Street, City, State" '
+         + 'style="width:100%;background:var(--input-bg);border:1px solid var(--border);color:var(--text);'
+         + 'border-radius:8px;padding:9px 12px;font-size:14px;box-sizing:border-box;font-family:inherit"></div>';
     // Decision Notes
     html += '<div style="margin-bottom:10px">'
          + '<label style="font-size:11px;font-weight:600;color:var(--text3);display:block;margin-bottom:4px">Decision Notes</label>'
@@ -577,7 +584,8 @@ async function saveEvent() {{
   var payload = {{
     'Event Status': document.getElementById('evt-edit-status').value,
     'Checked In': document.getElementById('evt-edit-checkedin').checked,
-    'Decision Notes': document.getElementById('evt-edit-decision').value
+    'Decision Notes': document.getElementById('evt-edit-decision').value,
+    'Venue Address': document.getElementById('evt-edit-addr').value
   }};
   // Equipment booleans
   document.querySelectorAll('[data-evt-eq]').forEach(function(el) {{
