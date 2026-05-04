@@ -27,14 +27,29 @@ def _mobile_company_detail_page(br: str, bt: str, company_id: int,
     gmap_id = os.environ.get("GOOGLE_MAPS_MAP_ID", "")
     body = (
         V3_CSS
-        # Header
-        + '<div class="mobile-hdr">'
-        '<button class="m-hamburger" onclick="goBack()" aria-label="Back" '
-        'style="margin-right:10px">←</button>'
+        # Header — 3-column grid so the company name stays truly centered
+        # while the Reform logo + back button stay anchored to the corner.
+        + '<style>'
+        '.cd-hdr{display:grid;grid-template-columns:1fr auto 1fr;align-items:center;gap:8px}'
+        '.cd-hdr .cd-left{justify-self:start;display:flex;align-items:center;gap:8px;min-width:0}'
+        '.cd-hdr .cd-center{justify-self:center;text-align:center;min-width:0;max-width:100%}'
+        '.cd-hdr .cd-right{justify-self:end}'
+        '.cd-back{background:none;border:1px solid var(--border);color:var(--text);'
+                 'border-radius:8px;width:34px;height:34px;font-size:18px;cursor:pointer;'
+                 'display:flex;align-items:center;justify-content:center;flex-shrink:0;'
+                 'font-family:inherit;line-height:1}'
+        '.cd-hdr .mobile-hdr-title{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}'
+        '</style>'
+        + '<div class="mobile-hdr cd-hdr">'
+        '<div class="cd-left">'
         '<div class="mobile-hdr-brand"><img src="/static/reform-logo.png" alt="Reform"></div>'
-        '<div style="flex:1;min-width:0"><div class="mobile-hdr-title" id="cd-name">Loading…</div>'
+        '<button class="cd-back" onclick="goBack()" aria-label="Back">←</button>'
+        '</div>'
+        '<div class="cd-center"><div class="mobile-hdr-title" id="cd-name">Loading…</div>'
         '<div class="mobile-hdr-sub" id="cd-sub"></div></div>'
+        '<div class="cd-right">'
         '<button class="m-hamburger" onclick="openMDrawer()" aria-label="Menu">☰</button>'
+        '</div>'
         '</div>'
         '<div class="mobile-body">'
         # Stats strip
