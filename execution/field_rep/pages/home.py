@@ -474,8 +474,10 @@ function hmRenderEventsStrip(upcoming) {
     .slice(0, 6);
   rail.innerHTML = sorted.map(e => {
     const when  = _hmRelDate(e['Event Date']);
-    const name  = esc(e['Name'] || 'Event');
-    const where = esc(e['Venue Address'] || e['Event Type'] || '');
+    const name  = esc(sv(e['Name']) || 'Event');
+    // Event Type is a Baserow single_select ({value,id,color}) — unwrap via
+    // sv() before passing to esc(), otherwise it stringifies to [object Object].
+    const where = esc(sv(e['Venue Address']) || sv(e['Event Type']) || '');
     return '<a class="event-card" href="/events">' +
              '<div class="event-when">' + esc(when) + '</div>' +
              '<div class="event-name">' + name + '</div>' +
