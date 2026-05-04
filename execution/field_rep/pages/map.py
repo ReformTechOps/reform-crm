@@ -39,6 +39,10 @@ _MAP_PICKER_CSS = """
 .m-route-stop-marker[data-status="Skipped"]      { border-color:#f97316; color:#f97316 }
 .m-route-stop-marker[data-status="Not Reached"]  { border-color:#ef4444; color:#ef4444 }
 .m-route-stop-marker[data-status="In Progress"]  { background:#004ac6; color:#fff }
+.m-map-brand { display:flex; align-items:center; padding:4px 8px;
+               background:var(--card); border-radius:18px;
+               box-shadow:0 1px 4px rgba(0,0,0,.18); flex-shrink:0 }
+.m-map-brand img { height:16px; width:auto; display:block }
 </style>
 """
 
@@ -60,7 +64,8 @@ def _mobile_map_page(br: str, bt: str, user: dict = None) -> str:
         '</div>'
         # Filter bar: route picker + search + tool pills + status pills
         '<div class="m-map-filters">'
-        '<div style="width:100%;display:flex;align-items:center;gap:6px">'
+        '<div style="width:100%;display:flex;align-items:center;gap:8px">'
+        '<div class="m-map-brand"><img src="/static/reform-logo.png" alt="Reform"></div>'
         '<select id="m-route-pick" class="m-route-pick" onchange="onRoutePick(this.value)">'
         '<option value="">— Preview Route —</option>'
         '</select>'

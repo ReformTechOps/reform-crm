@@ -17,13 +17,17 @@ from hub.shared import (
 )
 from hub.guerilla import GFR_EXTRA_HTML, GFR_EXTRA_JS
 
+from field_rep.styles import V3_CSS
+
 
 def _mobile_admin_page(br: str, bt: str, user: dict = None) -> str:
     user = user or {}
     user_name = user.get('name', '')
     user_email = (user.get('email', '') or '').strip().lower()
     body = (
-        '<div class="mobile-hdr">'
+        V3_CSS
+        + '<div class="mobile-hdr">'
+        '<div class="mobile-hdr-brand"><img src="/static/reform-logo.png" alt="Reform"></div>'
         '<div><div class="mobile-hdr-title">Admin</div>'
         '<div class="mobile-hdr-sub">Routes &amp; recent activity</div></div>'
         '<button class="m-hamburger" onclick="openMDrawer()" aria-label="Menu">☰</button>'

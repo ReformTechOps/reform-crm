@@ -29,18 +29,26 @@ def _mobile_route_page(br: str, bt: str, user: dict = None,
     route_endpoint = f"/api/guerilla/routes/{int(route_id)}" if route_id else "/api/guerilla/routes/today"
     body = (
         V3_CSS
+        + '<style>'
+        + '.rt-brand{display:flex;align-items:center;flex-shrink:0;margin-right:10px}'
+        + '.rt-brand img{height:16px;width:auto;display:block}'
+        + '.rt-empty-brand{display:flex;justify-content:center;margin-bottom:10px}'
+        + '.rt-empty-brand img{height:22px;width:auto;display:block}'
+        + '</style>'
         # Full-screen map for route
         + '<div class="m-map-wrap" id="rmap"></div>'
         # "No Active Routes" overlay (shown/hidden by JS)
         '<div id="rt-empty" style="display:none;position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);z-index:105;text-align:center;pointer-events:none">'
         '<div style="background:var(--bg2);border-radius:16px;padding:28px 36px;box-shadow:0 4px 20px rgba(0,0,0,.3)">'
+        '<div class="rt-empty-brand"><img src="/static/reform-logo.png" alt="Reform"></div>'
         '<div style="font-size:18px;font-weight:700;color:var(--text)">No Active Routes</div>'
         '</div></div>'
         # Progress bar overlay at top — pad for iOS notch/Dynamic Island in standalone PWA mode
         '<div id="rt-progress" style="position:fixed;top:0;left:0;right:0;z-index:110;background:var(--bg2);padding:calc(10px + env(safe-area-inset-top)) 16px 10px;border-bottom:1px solid var(--border);display:none">'
-        '<div style="display:flex;justify-content:space-between;align-items:center">'
-        '<div id="rt-name" style="font-size:14px;font-weight:700"></div>'
-        '<a href="/routes" style="font-size:12px;color:var(--text3);text-decoration:none">\u2190 Routes</a>'
+        '<div style="display:flex;align-items:center">'
+        '<div class="rt-brand"><img src="/static/reform-logo.png" alt="Reform"></div>'
+        '<div id="rt-name" style="flex:1;font-size:14px;font-weight:700;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"></div>'
+        '<a href="/routes" style="font-size:12px;color:var(--text3);text-decoration:none;margin-left:10px;flex-shrink:0">\u2190 Routes</a>'
         '</div>'
         '<div id="rt-count" style="font-size:12px;color:var(--text3);margin-top:3px"></div>'
         '<div id="rt-leftovers" onclick="openLeftoversPanel();return false;" '

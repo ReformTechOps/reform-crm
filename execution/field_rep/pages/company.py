@@ -31,6 +31,7 @@ def _mobile_company_detail_page(br: str, bt: str, company_id: int,
         + '<div class="mobile-hdr">'
         '<button class="m-hamburger" onclick="goBack()" aria-label="Back" '
         'style="margin-right:10px">←</button>'
+        '<div class="mobile-hdr-brand"><img src="/static/reform-logo.png" alt="Reform"></div>'
         '<div style="flex:1;min-width:0"><div class="mobile-hdr-title" id="cd-name">Loading…</div>'
         '<div class="mobile-hdr-sub" id="cd-sub"></div></div>'
         '<button class="m-hamburger" onclick="openMDrawer()" aria-label="Menu">☰</button>'
@@ -670,7 +671,9 @@ def _mobile_directory_page(br: str, bt: str, category: str = "",
         "community": "Community groups & events",
     }.get(category, "Every outreach company")
     body = (
-        '<div class="mobile-hdr">'
+        V3_CSS
+        + '<div class="mobile-hdr">'
+        '<div class="mobile-hdr-brand"><img src="/static/reform-logo.png" alt="Reform"></div>'
         f'<div><div class="mobile-hdr-title">{title}</div>'
         f'<div class="mobile-hdr-sub">{subtitle}</div></div>'
         '<button class="m-hamburger" onclick="openMDrawer()" aria-label="Menu">☰</button>'

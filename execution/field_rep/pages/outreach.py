@@ -25,6 +25,7 @@ def _mobile_outreach_due_page(br: str, bt: str, user: dict = None) -> str:
     body = (
         V3_CSS
         + '<div class="mobile-hdr">'
+        + '<div class="mobile-hdr-brand"><img src="/static/reform-logo.png" alt="Reform"></div>'
         + '<div><div class="mobile-hdr-title">To Do</div>'
         + '<div class="mobile-hdr-sub">Follow-ups due + stops you skipped</div></div>'
         + '<button class="m-hamburger" onclick="openMDrawer()" aria-label="Menu">☰</button>'
@@ -316,7 +317,9 @@ def _mobile_outreach_map_page(br: str, bt: str, user: dict = None) -> str:
     gmap_id = _os.environ.get("GOOGLE_MAPS_MAP_ID", "")
     user = user or {}
     body = (
-        '<div class="mobile-hdr">'
+        V3_CSS
+        + '<div class="mobile-hdr">'
+        '<div class="mobile-hdr-brand"><img src="/static/reform-logo.png" alt="Reform"></div>'
         '<div><div class="mobile-hdr-title">Route Map</div>'
         '<div class="mobile-hdr-sub" id="om-sub">Your route at a glance</div></div>'
         '<button class="m-hamburger" onclick="openMDrawer()" aria-label="Menu">☰</button>'

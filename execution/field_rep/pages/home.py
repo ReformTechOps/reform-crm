@@ -46,6 +46,20 @@ _HOME_CSS = """
               color:var(--text3); border:1px dashed var(--border);
               border-radius:10px; text-decoration:none; background:transparent }
 
+/* Start Kiosk shortcut (home-only). */
+.kiosk-cta { display:flex; align-items:center; gap:12px;
+             background:var(--card); border:1px solid var(--border);
+             border-radius:12px; padding:14px 16px; margin-bottom:18px;
+             text-decoration:none; color:inherit }
+.kiosk-cta:active { background:rgba(0,74,198,.06) }
+.kiosk-cta .material-symbols-outlined { font-size:26px; color:#004ac6;
+             flex-shrink:0 }
+.kiosk-cta-text { flex:1; min-width:0 }
+.kiosk-cta-title { font-size:14px; font-weight:700; color:var(--text);
+                   line-height:1.2 }
+.kiosk-cta-sub { font-size:11px; color:var(--text3); margin-top:2px }
+.kiosk-cta-arrow { font-size:18px; color:var(--text3); flex-shrink:0 }
+
 /* ── Map card ───────────────────────────────────────────────────────── */
 #home-map-card { margin-bottom:18px; border:1px solid var(--border);
                  border-radius:12px; overflow:hidden; background:var(--card) }
@@ -120,6 +134,13 @@ def _mobile_home_page(br: str, bt: str, user: dict = None) -> str:
         +     '<div class="event-empty">Loading…</div>'
         +   '</div>'
         + '</div>'
+        # ── Start Kiosk shortcut ───────────────────────────────────────────
+        + '<a href="/kiosk/setup" class="kiosk-cta">'
+        +   '<span class="material-symbols-outlined">tablet</span>'
+        +   '<div class="kiosk-cta-text"><div class="kiosk-cta-title">Start Kiosk Mode</div>'
+        +   '<div class="kiosk-cta-sub">Set up a tablet for guest sign-in</div></div>'
+        +   '<span class="kiosk-cta-arrow">→</span>'
+        + '</a>'
         # ── Quick-log row (3 buttons: Lead / Visit / Event) ────────────────
         + '<div class="qlog-row">'
         +   '<button class="qlog-btn" onclick="quickLog(\'lead\')">'
@@ -931,6 +952,7 @@ def _mobile_routes_dashboard_page(br: str, bt: str, user: dict = None) -> str:
     body = (
         V3_CSS
         + '<div class="mobile-hdr">'
+        '<div class="mobile-hdr-brand"><img src="/static/reform-logo.png" alt="Reform"></div>'
         '<div><div class="mobile-hdr-title">My Routes</div>'
         '<div class="mobile-hdr-sub">All your assigned routes</div></div>'
         '<button class="m-hamburger" onclick="openMDrawer()" aria-label="Menu">☰</button>'

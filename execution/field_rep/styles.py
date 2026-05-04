@@ -180,5 +180,10 @@ V3_CSS = """
 /* ── Label-caps utility (was inline span in home.py) ────────────── */
 .label-caps { font-size:11px; font-weight:700; color:var(--text3);
               letter-spacing:.6px; text-transform:uppercase }
+
+/* ── Page-header brand mark (small Reform logo, left of title) ─── */
+.mobile-hdr-brand { display:flex; align-items:center; padding-right:10px;
+                    flex-shrink:0 }
+.mobile-hdr-brand img { height:18px; width:auto; display:block }
 </style>
 """

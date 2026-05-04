@@ -60,6 +60,7 @@ def _mobile_events_page(br: str, bt: str, user: dict = None, archive: bool = Fal
     body = (
         V3_CSS
         + '<div class="mobile-hdr">'
+        + '<div class="mobile-hdr-brand"><img src="/static/reform-logo.png" alt="Reform"></div>'
         + f'<div><div class="mobile-hdr-title">{title}</div>'
         + f'<div class="mobile-hdr-sub">{subtitle}</div></div>'
         + '<button class="m-hamburger" onclick="openMDrawer()" aria-label="Menu">☰</button>'

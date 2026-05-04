@@ -93,6 +93,7 @@ def _mobile_lead_capture_page(br: str, bt: str, user: dict = None) -> str:
     body = (
         V3_CSS
         + '<div class="mobile-hdr">'
+        + '<div class="mobile-hdr-brand"><img src="/static/reform-logo.png" alt="Reform"></div>'
         + '<div><div class="mobile-hdr-title">Leads</div>'
         + '<div class="mobile-hdr-sub">All captured leads</div></div>'
         + '<button class="m-hamburger" onclick="openMDrawer()" aria-label="Menu">☰</button>'
@@ -509,7 +510,9 @@ def _mobile_log_page(br: str, bt: str, user: dict = None) -> str:
     user = user or {}
     user_name = user.get('name', '')
     body = (
-        '<div class="mobile-hdr">'
+        V3_CSS
+        + '<div class="mobile-hdr">'
+        '<div class="mobile-hdr-brand"><img src="/static/reform-logo.png" alt="Reform"></div>'
         '<div><div class="mobile-hdr-title">Log Activity</div>'
         '<div class="mobile-hdr-sub">Select a form to get started</div></div>'
         '<button class="m-hamburger" onclick="openMDrawer()" aria-label="Menu">☰</button>'

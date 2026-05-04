@@ -14,11 +14,15 @@ from hub.shared import (
 )
 from hub.styles import _CSS, _JS_SHARED
 
+from field_rep.styles import V3_CSS
+
 
 def _mobile_kiosk_setup_page(br: str, bt: str, user: dict | None = None) -> str:
     user = user or {}
     body = (
-        '<div class="mobile-hdr">'
+        V3_CSS
+        + '<div class="mobile-hdr">'
+        '<div class="mobile-hdr-brand"><img src="/static/reform-logo.png" alt="Reform"></div>'
         '<div><div class="mobile-hdr-title">Start kiosk</div>'
         '<div class="mobile-hdr-sub">Hand the device to leads</div></div>'
         '<button class="m-hamburger" onclick="openMDrawer()" aria-label="Menu">☰</button>'
@@ -182,8 +186,13 @@ def _kiosk_run_page(br: str, bt: str, kiosk_id: str) -> str:
     shared_js = _JS_SHARED.format(br=br, bt=bt)
 
     body = f"""
+<style>
+.kiosk-brand {{ display:flex; align-items:center; margin-right:14px; flex-shrink:0 }}
+.kiosk-brand img {{ height:24px; width:auto; display:block }}
+</style>
 <div class="kiosk-frame">
   <div class="kiosk-topbar">
+    <div class="kiosk-brand"><img src="/static/reform-logo.png" alt="Reform"></div>
     <div class="kiosk-event" id="ks-event-name">Loading…</div>
     <button class="kiosk-exit" onclick="openExitModal()" aria-label="Exit kiosk">Exit</button>
   </div>
