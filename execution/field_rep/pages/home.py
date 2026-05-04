@@ -41,6 +41,9 @@ _HOME_CSS = """
 #events-strip { margin-bottom:18px }
 #events-rail { margin-bottom:0 }
 
+/* Secondary address line on rail cards (lighter than the business line). */
+.event-where--addr { opacity:.75; font-size:10px }
+
 /* Yesterday recap dashed card (home-only). */
 .recap-card { display:block; text-align:center; padding:10px; font-size:12px;
               color:var(--text3); border:1px dashed var(--border);
@@ -475,13 +478,18 @@ function hmRenderEventsStrip(upcoming) {
   rail.innerHTML = sorted.map(e => {
     const when  = _hmRelDate(e['Event Date']);
     const name  = esc(sv(e['Name']) || 'Event');
-    // Event Type is a Baserow single_select ({value,id,color}) — unwrap via
-    // sv() before passing to esc(), otherwise it stringifies to [object Object].
-    const where = esc(sv(e['Venue Address']) || sv(e['Event Type']) || '');
+    // Business is a link_row → array of {id, value, name}. Join multiple
+    // linked businesses with a comma. Falls back to '' if none linked.
+    const bizRaw = Array.isArray(e['Business'])
+      ? e['Business'].map(b => (b && (b.value || b.name)) || '').filter(Boolean).join(', ')
+      : '';
+    const biz  = esc(bizRaw);
+    const addr = esc(sv(e['Venue Address']) || '');
     return '<a class="event-card" href="/events">' +
              '<div class="event-when">' + esc(when) + '</div>' +
              '<div class="event-name">' + name + '</div>' +
-             (where ? '<div class="event-where">' + where + '</div>' : '') +
+             (biz  ? '<div class="event-where">' + biz  + '</div>' : '') +
+             (addr ? '<div class="event-where event-where--addr">' + addr + '</div>' : '') +
            '</a>';
   }).join('');
 }
